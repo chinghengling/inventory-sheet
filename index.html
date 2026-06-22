@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 <title>盤點小幫手</title>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
@@ -13,42 +13,43 @@
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0; height:100%; background:var(--bg); color:var(--ink);
     font-family:-apple-system,"PingFang TC","Helvetica Neue",Arial,sans-serif;}
+  /* 直向 flex：名稱(auto) / 掃描(固定) / 控制(可縮) / 鍵盤(固定)，保證鍵盤不會蓋到掃描框 */
   body{display:flex; flex-direction:column; height:100dvh; overflow:hidden;}
-  .name{padding:10px 14px 6px; min-height:46px; display:flex; align-items:baseline; gap:10px;}
-  .name b{font-size:22px; font-weight:800; letter-spacing:.3px;}
+  .name{flex:0 0 auto; padding:8px 14px 4px; min-height:42px; display:flex; align-items:baseline; gap:10px;}
+  .name b{font-size:21px; font-weight:800; letter-spacing:.3px;}
   .name .sku{font-size:13px; color:var(--dim); font-variant-numeric:tabular-nums;}
   .name .empty{font-size:16px; color:var(--dim); font-weight:600;}
-  #reader{width:100%; height:32vh; min-height:32vh; background:#000; overflow:hidden;}
+  #reader{flex:0 0 auto; width:100%; height:34vh; background:#000; overflow:hidden; position:relative;}
   #reader video{object-fit:cover;}
-  .rescan{position:absolute; right:12px; margin-top:-38px; z-index:5;
-    background:rgba(13,17,23,.72); border:1px solid var(--line); color:var(--ink);
-    font-size:12px; padding:6px 10px; border-radius:999px;}
-  .rows{padding:8px 10px 0; display:flex; flex-direction:column; gap:7px;}
+  .scanning{position:absolute; left:10px; top:8px; z-index:5; font-size:11px; color:#9be8c8;
+    background:rgba(13,17,23,.6); padding:3px 9px; border-radius:999px;}
+  .mid{flex:1 1 auto; min-height:0; overflow-y:auto; padding:7px 10px 0;}
+  .rows{display:flex; flex-direction:column; gap:6px;}
   .label{font-size:11px; color:var(--dim); letter-spacing:1px; margin:0 2px -2px;}
   .opts{display:flex; gap:6px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none;}
   .opts::-webkit-scrollbar{display:none;}
   .opt{flex:0 0 auto; padding:9px 13px; border-radius:11px; border:1px solid var(--line);
     background:var(--panel); color:var(--ink); font-size:15px; font-weight:600; white-space:nowrap;}
   .opt.on{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
-  .opt:disabled{opacity:.35;}
-  .hint{font-size:12px; color:var(--warn); min-height:16px; margin:1px 2px 0; font-variant-numeric:tabular-nums;}
-  .disp{margin:6px 10px 0; background:#0A0D12; border:1px solid var(--line); border-radius:12px;
-    padding:10px 14px; font-size:30px; font-weight:800; text-align:right; font-variant-numeric:tabular-nums;
-    min-height:52px; letter-spacing:1px;}
+  .hint{font-size:12px; color:var(--warn); min-height:15px; margin:3px 2px 0; font-variant-numeric:tabular-nums;}
+  .disp{margin:5px 0 0; background:#0A0D12; border:1px solid var(--line); border-radius:12px;
+    padding:9px 14px; font-size:28px; font-weight:800; text-align:right; font-variant-numeric:tabular-nums;
+    min-height:50px; letter-spacing:1px;}
   .disp .ph{color:#3B4452;}
-  .pad{margin-top:auto; padding:8px 8px calc(8px + env(safe-area-inset-bottom));
-    display:grid; grid-template-columns:repeat(3,1fr); gap:7px;}
-  .key{padding:16px 0; border-radius:13px; border:1px solid var(--line); background:var(--panel);
-    color:var(--ink); font-size:23px; font-weight:700; font-variant-numeric:tabular-nums;}
+  .pad{flex:0 0 auto; padding:7px 8px calc(7px + env(safe-area-inset-bottom));
+    display:grid; grid-template-columns:repeat(3,1fr); gap:6px;}
+  .key{padding:13px 0; border-radius:12px; border:1px solid var(--line); background:var(--panel);
+    color:var(--ink); font-size:22px; font-weight:700; font-variant-numeric:tabular-nums;}
   .key:active{background:var(--pick);}
   .key.plus{background:#11241B; border-color:#1E4533; color:var(--accent);}
   .key.minus{background:#241313; border-color:#45211E; color:var(--bad);}
-  .key.enter{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-size:18px; font-weight:800;}
+  .key.enter{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-size:17px; font-weight:800;}
   .key:disabled{opacity:.3;}
-  .toast{position:fixed; left:50%; top:14px; transform:translateX(-50%);
-    max-width:92%; padding:11px 16px; border-radius:12px; font-size:14px; font-weight:600;
-    z-index:50; box-shadow:0 8px 24px rgba(0,0,0,.45); opacity:0; transition:opacity .18s, transform .18s; pointer-events:none;}
-  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast{position:fixed; left:50%; top:12px; transform:translateX(-50%);
+    max-width:92%; padding:10px 16px; border-radius:12px; font-size:14px; font-weight:600;
+    z-index:50; box-shadow:0 8px 24px rgba(0,0,0,.45); opacity:0; transition:opacity .18s; pointer-events:none;
+    white-space:pre-line;}
+  .toast.show{opacity:1;}
   .toast.ok{background:var(--accent); color:var(--accent-ink);}
   .toast.err{background:var(--bad); color:#1A0808;}
   .setup{position:fixed; inset:0; background:var(--bg); z-index:99; display:flex; flex-direction:column;
@@ -58,32 +59,35 @@
   .setup button{padding:12px 22px; border-radius:10px; border:none; background:var(--accent);
     color:var(--accent-ink); font-size:16px; font-weight:800;}
   .setup p{color:var(--dim); font-size:13px; max-width:420px; line-height:1.6;}
+  .setup .mini{font-size:12px;color:var(--dim);text-decoration:underline;background:none;padding:4px;font-weight:600;}
 </style>
 </head>
 <body>
   <div class="name" id="nameBar"><span class="empty">對準條碼開始盤點</span></div>
-  <div id="reader"></div>
-  <button class="rescan" id="rescanBtn" style="display:none" onclick="resumeScan()">重新掃描</button>
+  <div id="reader"><span class="scanning">● 持續掃描中</span></div>
 
-  <div class="rows">
-    <div id="posWrap" style="display:none">
-      <div class="label">位置</div><div class="opts" id="posRow"></div>
+  <div class="mid">
+    <div class="rows">
+      <div id="posWrap" style="display:none">
+        <div class="label">位置</div><div class="opts" id="posRow"></div>
+      </div>
+      <div id="specWrap" style="display:none">
+        <div class="label">規格</div><div class="opts" id="specRow"></div>
+      </div>
     </div>
-    <div id="specWrap" style="display:none">
-      <div class="label">規格</div><div class="opts" id="specRow"></div>
-    </div>
+    <div class="hint" id="hint"></div>
+    <div class="disp" id="disp"><span class="ph">0</span></div>
   </div>
-  <div class="hint" id="hint"></div>
-  <div class="disp" id="disp"><span class="ph">0</span></div>
 
   <div class="pad" id="pad"></div>
   <div class="toast" id="toast"></div>
 
   <div class="setup" id="setup">
     <div style="font-size:20px;font-weight:800">第一次設定</div>
-    <p>貼上你的 Apps Script 網址（部署後取得的 /exec 結尾網址）。只需設定一次，之後會記住。</p>
+    <p>貼上你的 Apps Script 網址（部署後 /exec 結尾）。只需設定一次。</p>
     <input id="urlInput" placeholder="https://script.google.com/macros/s/..../exec"/>
     <button onclick="saveUrl()">開始使用</button>
+    <button class="mini" onclick="testUrl()">測試連線</button>
   </div>
 
 <script>
@@ -571,45 +575,43 @@ const CFG = {
 const F = CFG.formulas;
 let URL = localStorage.getItem("scanner_url") || "";
 let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
-let scanner=null, busy=false;
+let scanner=null, sending=false;
 const lastPos = JSON.parse(localStorage.getItem("lastPos")||"{}");
 const lastSpec = JSON.parse(localStorage.getItem("lastSpec")||"{}");
 
 function $(id){return document.getElementById(id);}
 function todayTab(){const d=new Date(); return ""+(d.getMonth()+1)+d.getDate();}
 
-// ---------- 設定網址 ----------
 function saveUrl(){
   const v=$("urlInput").value.trim();
   if(!v.startsWith("http")){alert("請貼上正確的網址");return;}
   localStorage.setItem("scanner_url",v); URL=v; $("setup").style.display="none"; startScan();
 }
+function testUrl(){
+  const v=$("urlInput").value.trim()||URL;
+  if(!v){alert("請先貼上網址");return;}
+  fetch(v).then(r=>r.text()).then(t=>alert("回應：\n"+t.slice(0,200)))
+    .catch(e=>alert("連線失敗："+e.message));
+}
 if(URL){$("setup").style.display="none";}
 
-// ---------- 掃描 ----------
+// ---------- 掃描（持續運作，不暫停） ----------
 function startScan(){
   scanner=new Html5Qrcode("reader",{verbose:false});
-  scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:160},aspectRatio:1.4},
+  scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:170},aspectRatio:1.5},
     onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限","err"));
 }
 function onScan(text){
-  if(busy) return;
   const sku=text.trim().toUpperCase();
+  if(cur && sku===cur.sku) return;       // 同一個碼重複觸發 → 忽略，不洗掉輸入
   const item=CFG.items[sku];
-  if(!item){toast("查無此 SKU："+sku,"err"); return;}
-  busy=true; scanner.pause(true); $("rescanBtn").style.display="block";
-  loadItem(sku,item);
-}
-function resumeScan(){
-  cur=null; $("nameBar").innerHTML='<span class="empty">對準條碼開始盤點</span>';
-  $("posWrap").style.display="none"; $("specWrap").style.display="none";
-  $("hint").textContent=""; setDisp(""); $("rescanBtn").style.display="none";
-  busy=false; if(scanner) scanner.resume();
+  if(!item){ return; }                    // 不認得的碼安靜略過，避免狂跳錯誤
+  loadItem(sku,item);                     // 掃到新的碼 → 直接切換品項
 }
 
 // ---------- 載入品項 ----------
 function loadItem(sku,item){
-  cur={sku,...item}; sec=item.sec;
+  cur={sku,...item}; sec=item.sec; disp="";
   $("nameBar").innerHTML='<b>'+item.name+'</b><span class="sku">'+sku+'</span>';
   const positions = sec==="BP" ? item.positions : CFG.sections[sec].positions;
   const row=$("posRow"); row.innerHTML="";
@@ -618,10 +620,9 @@ function loadItem(sku,item){
     b.onclick=()=>selectPos(p); row.appendChild(b);
   });
   $("posWrap").style.display="block";
-  const def = (lastPos[sec] && positions.includes(lastPos[sec])) ? lastPos[sec] : positions[0];
-  selectPos(def);
+  const def=(lastPos[sec] && positions.includes(lastPos[sec]))?lastPos[sec]:positions[0];
+  selectPos(def); setDisp("");
 }
-
 function selectPos(p){
   pos=p; lastPos[sec]=p; localStorage.setItem("lastPos",JSON.stringify(lastPos));
   [...$("posRow").children].forEach(b=>b.classList.toggle("on",b.textContent===p));
@@ -632,7 +633,6 @@ function selectPos(p){
 function buildSpecs(){
   const S=CFG.sections[sec]; let specs=[];
   if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","整桶"]; }
-  else if(sec==="YG"){ /* 啤酒：冰箱插管=秤重(無子規格)，其餘整桶；空桶純計數 */ }
   else if(sec==="BP"){ if(cur.spec) specs=cur.spec.map(s=>s[0]); }
   const row=$("specRow");
   if(specs.length===0){ $("specWrap").style.display="none"; spec=null; applyMode(); return; }
@@ -649,19 +649,15 @@ function selectSpec(s){
   applyMode();
 }
 
-// ---------- 決定計算模式 ----------
+// ---------- 計算模式 ----------
 function applyMode(){
   const S=CFG.sections[sec];
   weigh=false; mult=1; writeCol=pos;
   if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L")){ weigh=true; writeCol=pos; }
-  else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; } // 秤重欄
-  else if(sec==="BP" && cur.spec){
-    const found=cur.spec.find(x=>x[0]===spec); mult=found?found[1]:1;
-  }
-  // 整桶 / 其餘位置 / 備品無規格 → 累加，mult 已定
-  setDisp(disp); updateHint();
-  // 啤酒秤重欄是公式，禁用 +1/-1
-  const beerWeigh = (sec==="YG" && weigh);
+  else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; }
+  else if(sec==="BP" && cur.spec){ const f=cur.spec.find(x=>x[0]===spec); mult=f?f[1]:1; }
+  updateHint();
+  const beerWeigh=(sec==="YG" && weigh);   // 啤酒秤重欄是公式，停用 +1/-1
   document.querySelectorAll(".key.plus,.key.minus").forEach(b=>b.disabled=beerWeigh);
 }
 function updateHint(){
@@ -670,9 +666,9 @@ function updateHint(){
     let v;
     if(sec==="YG") v=(w-F.beer.empty)/F.beer.cap;
     else{const k=spec==="10L"?F["10L"]:F["15L"]; v=(w-k.empty)/k.cap;}
-    h.textContent="換算 "+(sec==="YG"?"（"+spec+"）":"（"+spec+"）")+"："+v.toFixed(3)+" 桶";
-  } else if(sec==="BP" && cur.spec && mult>1){
-    h.textContent="1 "+spec+" = "+mult+" 個基本單位";
+    h.textContent="換算（"+(sec==="YG"?"秤重":spec)+"）："+v.toFixed(3)+" 桶";
+  } else if(sec==="BP" && cur && cur.spec && mult>1){
+    h.textContent="1 "+spec+" = "+mult+" 個";
   } else h.textContent="";
 }
 
@@ -690,17 +686,15 @@ function press(k){
   if(k==="⌫"){ disp=disp.slice(0,-1); setDisp(disp); updateHint(); return; }
   if(k==="."){ if(!disp.includes("."))disp=(disp||"0")+"."; setDisp(disp); return; }
   if(/[0-9]/.test(k)){ if(disp==="0")disp=""; disp+=k; setDisp(disp); updateHint(); return; }
-  if(k==="+1"){ submit("add",mult); return; }
-  if(k==="-1"){ submit("add",-mult); return; }
+  if(k==="+1"){ submit("add",mult); return; }   // 直接送出，不必再按輸入
+  if(k==="-1"){ submit("add",-mult); return; }   // 直接送出
   if(k==="輸入"){
     const n=parseFloat(disp);
     if(isNaN(n)){ toast("請先輸入數字","err"); return; }
     if(weigh){
-      let v;
-      if(sec==="YG"){ submit("set",n); return; }      // 啤酒：把重量寫進秤重欄
-      const kk=spec==="10L"?F["10L"]:F["15L"]; v=(n-kk.empty)/kk.cap;
-      submit("set",v);                                 // 調酒：寫換算後數字
-    } else { submit("add",n*mult); }
+      if(sec==="YG"){ submit("set",n); return; }
+      const kk=spec==="10L"?F["10L"]:F["15L"]; submit("set",(n-kk.empty)/kk.cap);
+    } else submit("add",n*mult);
   }
 }
 function setDisp(v){ disp=v; $("disp").innerHTML = v===""? '<span class="ph">0</span>' : v; }
@@ -708,27 +702,33 @@ function setDisp(v){ disp=v; $("disp").innerHTML = v===""? '<span class="ph">0</
 // ---------- 送出 ----------
 function submit(op,value){
   if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
+  if(sending){ return; }
+  sending=true;
   const payload={sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
     header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab()};
   toast("傳送中…","ok");
   fetch(URL,{method:"POST",body:JSON.stringify(payload)})
-    .then(r=>r.json())
+    .then(async r=>{
+      const txt=await r.text();
+      let res; try{ res=JSON.parse(txt); }
+      catch(e){ throw new Error("回應不是 JSON（可能是權限或未部署）：\n"+txt.slice(0,90)); }
+      return res;
+    })
     .then(res=>{
+      sending=false;
       if(res.success){
-        const shown = op==="set"? value.toFixed? value.toFixed(3):value : (value>0?"+":"")+value;
-        toast("✓ "+cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown+"　合計 "+(res.total??"-"),"ok");
-        setDisp(""); updateHint();
-        setTimeout(resumeScan,900);
+        const shown = op==="set" ? Number(value).toFixed(3) : (value>0?"+":"")+value;
+        toast("✓ "+cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown+"\n合計 "+(res.total??"-"),"ok");
+        setDisp(""); updateHint();   // 保留品項與位置，方便連續輸入
       } else toast("✗ "+(res.error||"寫入失敗"),"err");
     })
-    .catch(()=>toast("✗ 連線失敗，請檢查網路或網址","err"));
+    .catch(e=>{ sending=false; toast("✗ "+e.message,"err"); console.log("submit error",e); });
 }
 
-// ---------- toast ----------
 let tTimer=null;
 function toast(msg,type){
   const t=$("toast"); t.textContent=msg; t.className="toast "+type+" show";
-  clearTimeout(tTimer); tTimer=setTimeout(()=>t.className="toast "+type,2200);
+  clearTimeout(tTimer); tTimer=setTimeout(()=>t.className="toast "+type,2600);
 }
 
 renderPad();

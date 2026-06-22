@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>盤點小幫手</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{
+    --bg:#0E1116; --panel:#171C24; --line:#262E3A; --ink:#E8EDF4; --dim:#8A95A6;
+    --accent:#3DDC97; --accent-ink:#06140E; --warn:#F2B544; --bad:#FF6B6B; --pick:#2A3442;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"PingFang TC","Helvetica Neue",Arial,sans-serif;}
+  body{display:flex; flex-direction:column; height:100dvh; overflow:hidden;}
+  .name{padding:10px 14px 6px; min-height:46px; display:flex; align-items:baseline; gap:10px;}
+  .name b{font-size:22px; font-weight:800; letter-spacing:.3px;}
+  .name .sku{font-size:13px; color:var(--dim); font-variant-numeric:tabular-nums;}
+  .name .empty{font-size:16px; color:var(--dim); font-weight:600;}
+  #reader{width:100%; height:32vh; min-height:32vh; background:#000; overflow:hidden;}
+  #reader video{object-fit:cover;}
+  .rescan{position:absolute; right:12px; margin-top:-38px; z-index:5;
+    background:rgba(13,17,23,.72); border:1px solid var(--line); color:var(--ink);
+    font-size:12px; padding:6px 10px; border-radius:999px;}
+  .rows{padding:8px 10px 0; display:flex; flex-direction:column; gap:7px;}
+  .label{font-size:11px; color:var(--dim); letter-spacing:1px; margin:0 2px -2px;}
+  .opts{display:flex; gap:6px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none;}
+  .opts::-webkit-scrollbar{display:none;}
+  .opt{flex:0 0 auto; padding:9px 13px; border-radius:11px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink); font-size:15px; font-weight:600; white-space:nowrap;}
+  .opt.on{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+  .opt:disabled{opacity:.35;}
+  .hint{font-size:12px; color:var(--warn); min-height:16px; margin:1px 2px 0; font-variant-numeric:tabular-nums;}
+  .disp{margin:6px 10px 0; background:#0A0D12; border:1px solid var(--line); border-radius:12px;
+    padding:10px 14px; font-size:30px; font-weight:800; text-align:right; font-variant-numeric:tabular-nums;
+    min-height:52px; letter-spacing:1px;}
+  .disp .ph{color:#3B4452;}
+  .pad{margin-top:auto; padding:8px 8px calc(8px + env(safe-area-inset-bottom));
+    display:grid; grid-template-columns:repeat(3,1fr); gap:7px;}
+  .key{padding:16px 0; border-radius:13px; border:1px solid var(--line); background:var(--panel);
+    color:var(--ink); font-size:23px; font-weight:700; font-variant-numeric:tabular-nums;}
+  .key:active{background:var(--pick);}
+  .key.plus{background:#11241B; border-color:#1E4533; color:var(--accent);}
+  .key.minus{background:#241313; border-color:#45211E; color:var(--bad);}
+  .key.enter{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-size:18px; font-weight:800;}
+  .key:disabled{opacity:.3;}
+  .toast{position:fixed; left:50%; top:14px; transform:translateX(-50%);
+    max-width:92%; padding:11px 16px; border-radius:12px; font-size:14px; font-weight:600;
+    z-index:50; box-shadow:0 8px 24px rgba(0,0,0,.45); opacity:0; transition:opacity .18s, transform .18s; pointer-events:none;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast.ok{background:var(--accent); color:var(--accent-ink);}
+  .toast.err{background:var(--bad); color:#1A0808;}
+  .setup{position:fixed; inset:0; background:var(--bg); z-index:99; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center;}
+  .setup input{width:100%; max-width:420px; padding:12px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink); font-size:15px;}
+  .setup button{padding:12px 22px; border-radius:10px; border:none; background:var(--accent);
+    color:var(--accent-ink); font-size:16px; font-weight:800;}
+  .setup p{color:var(--dim); font-size:13px; max-width:420px; line-height:1.6;}
+</style>
+</head>
+<body>
+  <div class="name" id="nameBar"><span class="empty">對準條碼開始盤點</span></div>
+  <div id="reader"></div>
+  <button class="rescan" id="rescanBtn" style="display:none" onclick="resumeScan()">重新掃描</button>
+
+  <div class="rows">
+    <div id="posWrap" style="display:none">
+      <div class="label">位置</div><div class="opts" id="posRow"></div>
+    </div>
+    <div id="specWrap" style="display:none">
+      <div class="label">規格</div><div class="opts" id="specRow"></div>
+    </div>
+  </div>
+  <div class="hint" id="hint"></div>
+  <div class="disp" id="disp"><span class="ph">0</span></div>
+
+  <div class="pad" id="pad"></div>
+  <div class="toast" id="toast"></div>
+
+  <div class="setup" id="setup">
+    <div style="font-size:20px;font-weight:800">第一次設定</div>
+    <p>貼上你的 Apps Script 網址（部署後取得的 /exec 結尾網址）。只需設定一次，之後會記住。</p>
+    <input id="urlInput" placeholder="https://script.google.com/macros/s/..../exec"/>
+    <button onclick="saveUrl()">開始使用</button>
+  </div>
+
+<script>
+const CFG = {
+ "sections": {
+  "JZ": {
+   "block": "假裝清醒",
+   "kind": "cocktail",
+   "positions": [
+    "吧檯插管",
+    "吧檯未插",
+    "酉鬼",
+    "橘桶",
+    "一倉冰箱"
+   ],
+   "tap": "吧檯插管",
+   "sig": "橘桶",
+   "header": "品名"
+  },
+  "HB": {
+   "block": "烘焙雲",
+   "kind": "cocktail",
+   "positions": [
+    "吧檯插管",
+    "吧檯未插",
+    "POS冰箱",
+    "DJ冰箱",
+    "T區冰箱左",
+    "一倉冰箱"
+   ],
+   "tap": "吧檯插管",
+   "sig": "POS冰箱",
+   "header": "品名"
+  },
+  "YG": {
+   "block": "酉鬼",
+   "kind": "beer",
+   "positions": [
+    "冰箱插管",
+    "冰箱未插",
+    "倉庫",
+    "酉鬼內未冰"
+   ],
+   "tap": "冰箱插管",
+   "weighCol": "秤重",
+   "sig": "酉鬼內未冰",
+   "header": "品名"
+  },
+  "BP": {
+   "block": "備品",
+   "kind": "consumable",
+   "header": "品名（Key個數）",
+   "sig": "備品"
+  }
+ },
+ "items": {
+  "JZ001": {
+   "name": "Mango Yellow",
+   "sec": "JZ"
+  },
+  "JZ002": {
+   "name": "Pichi Pichi",
+   "sec": "JZ"
+  },
+  "JZ003": {
+   "name": "Honey Yuzu",
+   "sec": "JZ"
+  },
+  "JZ004": {
+   "name": "Strawberry No5",
+   "sec": "JZ"
+  },
+  "JZ005": {
+   "name": "Skittles",
+   "sec": "JZ"
+  },
+  "JZ006": {
+   "name": "bando",
+   "sec": "JZ"
+  },
+  "JZ007": {
+   "name": "Hawaii Tea Sour",
+   "sec": "JZ"
+  },
+  "JZ008": {
+   "name": "Play Gum",
+   "sec": "JZ"
+  },
+  "JZ009": {
+   "name": "Mocktail",
+   "sec": "JZ"
+  },
+  "JZ010": {
+   "name": "活動調酒(大)",
+   "sec": "JZ"
+  },
+  "HB001": {
+   "name": "Sangria Sherry",
+   "sec": "HB"
+  },
+  "HB002": {
+   "name": "Rose Sour",
+   "sec": "HB"
+  },
+  "HB003": {
+   "name": "Jasmin Spritz",
+   "sec": "HB"
+  },
+  "HB004": {
+   "name": "Pineapple Punch",
+   "sec": "HB"
+  },
+  "HB005": {
+   "name": "Baisl Breeze",
+   "sec": "HB"
+  },
+  "HB006": {
+   "name": "Rabbit Fruit",
+   "sec": "HB"
+  },
+  "HB007": {
+   "name": "Orange Day",
+   "sec": "HB"
+  },
+  "HB008": {
+   "name": "Sober Ice Tea",
+   "sec": "HB"
+  },
+  "HB009": {
+   "name": "Mocktail",
+   "sec": "HB"
+  },
+  "HB010": {
+   "name": "活動調酒(大)",
+   "sec": "HB"
+  },
+  "YG001": {
+   "name": "戀夏365",
+   "sec": "YG"
+  },
+  "YG002": {
+   "name": "芭樂鹽小麥",
+   "sec": "YG"
+  },
+  "YG003": {
+   "name": "醜啤",
+   "sec": "YG"
+  },
+  "YG004": {
+   "name": "撥雲霧見蓬萊仙島",
+   "sec": "YG"
+  },
+  "YG005": {
+   "name": "吐司去邊大冰紅",
+   "sec": "YG"
+  },
+  "YG006": {
+   "name": "酒花蘋果",
+   "sec": "YG"
+  },
+  "YG007": {
+   "name": "空桶",
+   "sec": "YG",
+   "countOnly": true
+  },
+  "BP001": {
+   "name": "CO2大",
+   "sec": "BP",
+   "positions": [
+    "一倉"
+   ]
+  },
+  "BP002": {
+   "name": "CO2小",
+   "sec": "BP",
+   "positions": [
+    "一倉"
+   ]
+  },
+  "BP003": {
+   "name": "空桶數量",
+   "sec": "BP",
+   "positions": [
+    "一倉"
+   ]
+  },
+  "BP004": {
+   "name": "彩虹糖",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "小倉(一店)"
+   ]
+  },
+  "BP005": {
+   "name": "飛機餅乾",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ]
+  },
+  "BP006": {
+   "name": "9*9衛生紙",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)",
+    "一倉"
+   ],
+   "spec": [
+    [
+     "箱",
+     36
+    ],
+    [
+     "包",
+     1
+    ]
+   ]
+  },
+  "BP007": {
+   "name": "擦手紙",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ],
+   "spec": [
+    [
+     "箱",
+     20
+    ],
+    [
+     "包",
+     1
+    ]
+   ]
+  },
+  "BP008": {
+   "name": "粉紅垃圾袋",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)",
+    "小倉(二店)"
+   ]
+  },
+  "BP009": {
+   "name": "大垃圾袋",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)",
+    "小倉(二店)"
+   ]
+  },
+  "BP010": {
+   "name": "咖啡抹布",
+   "sec": "BP",
+   "positions": [
+    "小倉(一店)",
+    "小倉(二店)"
+   ]
+  },
+  "BP011": {
+   "name": "白抹布",
+   "sec": "BP",
+   "positions": [
+    "小倉(一店)",
+    "小倉(二店)"
+   ],
+   "spec": [
+    [
+     "包",
+     12
+    ],
+    [
+     "條",
+     1
+    ]
+   ]
+  },
+  "BP012": {
+   "name": "口布",
+   "sec": "BP",
+   "positions": [
+    "小倉(一店)",
+    "小倉(二店)"
+   ]
+  },
+  "BP013": {
+   "name": "PLA大",
+   "sec": "BP",
+   "positions": [
+    "酉鬼",
+    "一倉"
+   ],
+   "spec": [
+    [
+     "箱",
+     500
+    ],
+    [
+     "杯",
+     1
+    ]
+   ]
+  },
+  "BP014": {
+   "name": "PLA小",
+   "sec": "BP",
+   "positions": [
+    "酉鬼",
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)",
+    "一倉"
+   ],
+   "spec": [
+    [
+     "箱",
+     500
+    ],
+    [
+     "杯",
+     1
+    ]
+   ]
+  },
+  "BP015": {
+   "name": "威杯",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ],
+   "spec": [
+    [
+     "盒",
+     6
+    ],
+    [
+     "個",
+     1
+    ]
+   ]
+  },
+  "BP016": {
+   "name": "Highball杯",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ],
+   "spec": [
+    [
+     "盒",
+     6
+    ],
+    [
+     "個",
+     1
+    ]
+   ]
+  },
+  "BP017": {
+   "name": "Shot杯",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ],
+   "spec": [
+    [
+     "盒",
+     12
+    ],
+    [
+     "個",
+     1
+    ]
+   ]
+  },
+  "BP018": {
+   "name": "蠟燭杯",
+   "sec": "BP",
+   "positions": [
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ]
+  },
+  "BP019": {
+   "name": "蠟燭",
+   "sec": "BP",
+   "positions": [
+    "小倉(二店)"
+   ],
+   "spec": [
+    [
+     "盒",
+     100
+    ],
+    [
+     "入",
+     1
+    ]
+   ]
+  },
+  "BP020": {
+   "name": "大紙捲",
+   "sec": "BP",
+   "positions": [
+    "酉鬼",
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ]
+  },
+  "BP021": {
+   "name": "國泰紙捲",
+   "sec": "BP",
+   "positions": [
+    "酉鬼",
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ],
+   "spec": [
+    [
+     "條",
+     5
+    ],
+    [
+     "個",
+     1
+    ]
+   ]
+  },
+  "BP022": {
+   "name": "聯合紙捲",
+   "sec": "BP",
+   "positions": [
+    "酉鬼",
+    "假裝現場",
+    "烘焙現場",
+    "小倉(一店)"
+   ],
+   "spec": [
+    [
+     "條",
+     3
+    ],
+    [
+     "個",
+     1
+    ]
+   ]
+  }
+ },
+ "formulas": {
+  "10L": {
+   "empty": 2.45,
+   "cap": 10
+  },
+  "15L": {
+   "empty": 3,
+   "cap": 15
+  },
+  "beer": {
+   "empty": 6,
+   "cap": 20
+  }
+ }
+};
+const F = CFG.formulas;
+let URL = localStorage.getItem("scanner_url") || "";
+let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
+let scanner=null, busy=false;
+const lastPos = JSON.parse(localStorage.getItem("lastPos")||"{}");
+const lastSpec = JSON.parse(localStorage.getItem("lastSpec")||"{}");
+
+function $(id){return document.getElementById(id);}
+function todayTab(){const d=new Date(); return ""+(d.getMonth()+1)+d.getDate();}
+
+// ---------- 設定網址 ----------
+function saveUrl(){
+  const v=$("urlInput").value.trim();
+  if(!v.startsWith("http")){alert("請貼上正確的網址");return;}
+  localStorage.setItem("scanner_url",v); URL=v; $("setup").style.display="none"; startScan();
+}
+if(URL){$("setup").style.display="none";}
+
+// ---------- 掃描 ----------
+function startScan(){
+  scanner=new Html5Qrcode("reader",{verbose:false});
+  scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:160},aspectRatio:1.4},
+    onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限","err"));
+}
+function onScan(text){
+  if(busy) return;
+  const sku=text.trim().toUpperCase();
+  const item=CFG.items[sku];
+  if(!item){toast("查無此 SKU："+sku,"err"); return;}
+  busy=true; scanner.pause(true); $("rescanBtn").style.display="block";
+  loadItem(sku,item);
+}
+function resumeScan(){
+  cur=null; $("nameBar").innerHTML='<span class="empty">對準條碼開始盤點</span>';
+  $("posWrap").style.display="none"; $("specWrap").style.display="none";
+  $("hint").textContent=""; setDisp(""); $("rescanBtn").style.display="none";
+  busy=false; if(scanner) scanner.resume();
+}
+
+// ---------- 載入品項 ----------
+function loadItem(sku,item){
+  cur={sku,...item}; sec=item.sec;
+  $("nameBar").innerHTML='<b>'+item.name+'</b><span class="sku">'+sku+'</span>';
+  const positions = sec==="BP" ? item.positions : CFG.sections[sec].positions;
+  const row=$("posRow"); row.innerHTML="";
+  positions.forEach(p=>{
+    const b=document.createElement("button"); b.className="opt"; b.textContent=p;
+    b.onclick=()=>selectPos(p); row.appendChild(b);
+  });
+  $("posWrap").style.display="block";
+  const def = (lastPos[sec] && positions.includes(lastPos[sec])) ? lastPos[sec] : positions[0];
+  selectPos(def);
+}
+
+function selectPos(p){
+  pos=p; lastPos[sec]=p; localStorage.setItem("lastPos",JSON.stringify(lastPos));
+  [...$("posRow").children].forEach(b=>b.classList.toggle("on",b.textContent===p));
+  buildSpecs();
+}
+
+// ---------- 規格 ----------
+function buildSpecs(){
+  const S=CFG.sections[sec]; let specs=[];
+  if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","整桶"]; }
+  else if(sec==="YG"){ /* 啤酒：冰箱插管=秤重(無子規格)，其餘整桶；空桶純計數 */ }
+  else if(sec==="BP"){ if(cur.spec) specs=cur.spec.map(s=>s[0]); }
+  const row=$("specRow");
+  if(specs.length===0){ $("specWrap").style.display="none"; spec=null; applyMode(); return; }
+  row.innerHTML="";
+  specs.forEach(s=>{const b=document.createElement("button"); b.className="opt"; b.textContent=s;
+    b.onclick=()=>selectSpec(s); row.appendChild(b);});
+  $("specWrap").style.display="block";
+  const def=(lastSpec[sec] && specs.includes(lastSpec[sec]))?lastSpec[sec]:specs[0];
+  selectSpec(def);
+}
+function selectSpec(s){
+  spec=s; lastSpec[sec]=s; localStorage.setItem("lastSpec",JSON.stringify(lastSpec));
+  [...$("specRow").children].forEach(b=>b.classList.toggle("on",b.textContent===s));
+  applyMode();
+}
+
+// ---------- 決定計算模式 ----------
+function applyMode(){
+  const S=CFG.sections[sec];
+  weigh=false; mult=1; writeCol=pos;
+  if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L")){ weigh=true; writeCol=pos; }
+  else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; } // 秤重欄
+  else if(sec==="BP" && cur.spec){
+    const found=cur.spec.find(x=>x[0]===spec); mult=found?found[1]:1;
+  }
+  // 整桶 / 其餘位置 / 備品無規格 → 累加，mult 已定
+  setDisp(disp); updateHint();
+  // 啤酒秤重欄是公式，禁用 +1/-1
+  const beerWeigh = (sec==="YG" && weigh);
+  document.querySelectorAll(".key.plus,.key.minus").forEach(b=>b.disabled=beerWeigh);
+}
+function updateHint(){
+  const h=$("hint"); const w=parseFloat(disp);
+  if(weigh && !isNaN(w)){
+    let v;
+    if(sec==="YG") v=(w-F.beer.empty)/F.beer.cap;
+    else{const k=spec==="10L"?F["10L"]:F["15L"]; v=(w-k.empty)/k.cap;}
+    h.textContent="換算 "+(sec==="YG"?"（"+spec+"）":"（"+spec+"）")+"："+v.toFixed(3)+" 桶";
+  } else if(sec==="BP" && cur.spec && mult>1){
+    h.textContent="1 "+spec+" = "+mult+" 個基本單位";
+  } else h.textContent="";
+}
+
+// ---------- 鍵盤 ----------
+const KEYS=[["1","2","3"],["4","5","6"],["7","8","9"],[".","0","⌫"],["+1","-1","輸入"]];
+function renderPad(){
+  const pad=$("pad"); pad.innerHTML="";
+  KEYS.flat().forEach(k=>{
+    const b=document.createElement("button"); b.textContent=k; b.className="key";
+    if(k==="+1")b.className+=" plus"; if(k==="-1")b.className+=" minus"; if(k==="輸入")b.className+=" enter";
+    b.onclick=()=>press(k); pad.appendChild(b);
+  });
+}
+function press(k){
+  if(k==="⌫"){ disp=disp.slice(0,-1); setDisp(disp); updateHint(); return; }
+  if(k==="."){ if(!disp.includes("."))disp=(disp||"0")+"."; setDisp(disp); return; }
+  if(/[0-9]/.test(k)){ if(disp==="0")disp=""; disp+=k; setDisp(disp); updateHint(); return; }
+  if(k==="+1"){ submit("add",mult); return; }
+  if(k==="-1"){ submit("add",-mult); return; }
+  if(k==="輸入"){
+    const n=parseFloat(disp);
+    if(isNaN(n)){ toast("請先輸入數字","err"); return; }
+    if(weigh){
+      let v;
+      if(sec==="YG"){ submit("set",n); return; }      // 啤酒：把重量寫進秤重欄
+      const kk=spec==="10L"?F["10L"]:F["15L"]; v=(n-kk.empty)/kk.cap;
+      submit("set",v);                                 // 調酒：寫換算後數字
+    } else { submit("add",n*mult); }
+  }
+}
+function setDisp(v){ disp=v; $("disp").innerHTML = v===""? '<span class="ph">0</span>' : v; }
+
+// ---------- 送出 ----------
+function submit(op,value){
+  if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
+  const payload={sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
+    header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab()};
+  toast("傳送中…","ok");
+  fetch(URL,{method:"POST",body:JSON.stringify(payload)})
+    .then(r=>r.json())
+    .then(res=>{
+      if(res.success){
+        const shown = op==="set"? value.toFixed? value.toFixed(3):value : (value>0?"+":"")+value;
+        toast("✓ "+cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown+"　合計 "+(res.total??"-"),"ok");
+        setDisp(""); updateHint();
+        setTimeout(resumeScan,900);
+      } else toast("✗ "+(res.error||"寫入失敗"),"err");
+    })
+    .catch(()=>toast("✗ 連線失敗，請檢查網路或網址","err"));
+}
+
+// ---------- toast ----------
+let tTimer=null;
+function toast(msg,type){
+  const t=$("toast"); t.textContent=msg; t.className="toast "+type+" show";
+  clearTimeout(tTimer); tTimer=setTimeout(()=>t.className="toast "+type,2200);
+}
+
+renderPad();
+if(URL) startScan();
+</script>
+</body>
+</html>

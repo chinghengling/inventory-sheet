@@ -13,7 +13,6 @@
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0; height:100%; background:var(--bg); color:var(--ink);
     font-family:-apple-system,"PingFang TC","Helvetica Neue",Arial,sans-serif;}
-  /* 六個固定區塊，總高 100dvh，不可上下滑動 */
   body{height:100dvh; overflow:hidden; display:flex; flex-direction:column;}
 
   /* ① 品名 5% */
@@ -22,9 +21,10 @@
   .name .sku{font-size:clamp(11px,1.8vh,13px); color:var(--dim); font-variant-numeric:tabular-nums;}
   .name .empty{font-size:clamp(13px,2.4vh,16px); color:var(--dim); font-weight:600;}
 
-  /* ② 掃描框 20% */
-  #reader{height:20dvh; width:100%; background:#000; overflow:hidden; position:relative;}
-  #reader video{object-fit:cover;}
+  /* ② 相機（橫向長方形，固定在上方；下方完全不顯示相機） 27% */
+  #reader{height:27dvh; width:100%; background:#000; overflow:hidden; position:relative;}
+  #reader video{width:100%!important; height:100%!important; object-fit:cover!important;}
+  #reader canvas, #reader img{max-height:100%!important;}
   .scanning{position:absolute; left:9px; top:6px; z-index:6; font-size:11px; color:#9be8c8;
     background:rgba(13,17,23,.6); padding:2px 9px; border-radius:999px;}
 
@@ -40,28 +40,26 @@
 
   /* ④ 數字輸入欄 8% */
   .disp{height:8dvh; margin:0 10px; background:#0A0D12; border:1px solid var(--line); border-radius:12px;
-    padding:0 14px; font-size:clamp(20px,4.6vh,30px); font-weight:800; text-align:right;
-    font-variant-numeric:tabular-nums; letter-spacing:1px; display:flex; align-items:center; justify-content:flex-end; gap:10px;}
+    padding:0 14px; font-weight:800; text-align:right; font-variant-numeric:tabular-nums; letter-spacing:1px;
+    display:flex; align-items:center; justify-content:flex-end; gap:10px;}
+  .disp #dval{font-size:clamp(20px,4.6vh,30px);}
   .disp .hint{font-size:clamp(10px,1.7vh,12px); color:var(--warn); font-weight:600; flex:1; text-align:left;}
   .disp .ph{color:#3B4452;}
 
-  /* ⑤ 數字鍵盤 40%（內含 數字 / 輸入 / +1 -1） */
-  .padzone{height:40dvh; padding:6px 8px 0; display:flex; flex-direction:column; gap:6px;}
-  .numgrid{flex:4; display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(4,1fr); gap:6px;}
-  .enterrow{flex:1; display:flex;}
-  .pm{flex:1; display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+  /* ⑤ 數字鍵盤 3×5  40% */
+  .padzone{height:40dvh; padding:6px 8px 0; display:grid;
+    grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(5,1fr); gap:6px;}
   .key{border-radius:11px; border:1px solid var(--line); background:var(--panel); color:var(--ink);
-    font-size:clamp(18px,3.6vh,24px); font-weight:700; font-variant-numeric:tabular-nums;
+    font-size:clamp(18px,3.4vh,24px); font-weight:700; font-variant-numeric:tabular-nums;
     display:flex; align-items:center; justify-content:center;}
   .key:active{background:var(--pick);}
-  .enterbtn{width:100%; background:var(--accent); border-color:var(--accent); color:var(--accent-ink);
-    font-size:clamp(16px,3vh,20px); font-weight:800;}
-  .plus{background:#11241B; border-color:#1E4533; color:var(--accent);}
-  .minus{background:#241313; border-color:#45211E; color:var(--bad);}
+  .key.plus{background:#11241B; border-color:#1E4533; color:var(--accent);}
+  .key.minus{background:#241313; border-color:#45211E; color:var(--bad);}
+  .key.enter{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-size:clamp(16px,3vh,20px); font-weight:800;}
   .key:disabled{opacity:.3;}
 
-  /* ⑥ 底部留空 10% */
-  .blank{height:10dvh;}
+  /* ⑥ 底部留空 3% */
+  .blank{height:3dvh;}
 
   .toast{position:fixed; left:50%; top:10px; transform:translateX(-50%);
     max-width:92%; padding:9px 16px; border-radius:12px; font-size:14px; font-weight:600;
@@ -87,14 +85,7 @@
 
   <div class="disp" id="disp"><span class="hint" id="hint"></span><span id="dval"><span class="ph">0</span></span></div>
 
-  <div class="padzone">
-    <div class="numgrid" id="pad"></div>
-    <div class="enterrow"><button class="key enterbtn" onclick="press('輸入')">輸入</button></div>
-    <div class="pm">
-      <button class="key plus" id="plusBtn" onclick="submit('add',mult)">+1</button>
-      <button class="key minus" id="minusBtn" onclick="submit('add',-mult)">-1</button>
-    </div>
-  </div>
+  <div class="padzone" id="pad"></div>
 
   <div class="blank"></div>
   <div class="toast" id="toast"></div>
@@ -594,19 +585,19 @@ const lastSpec = JSON.parse(localStorage.getItem("lastSpec")||"{}");
 function $(id){return document.getElementById(id);}
 function todayTab(){const d=new Date(); return ""+(d.getMonth()+1)+d.getDate();}
 
-// ---------- 掃描：持續運作，讀取範圍鎖在可見框內 ----------
+// ---------- 相機：橫向、持續掃描，讀取範圍鎖在框內 ----------
 function startScan(){
   scanner=new Html5Qrcode("reader",{verbose:false});
-  const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.85); return {width:s,height:s}; };
-  scanner.start({facingMode:"environment"},{fps:12,qrbox:qrbox},
+  const qrbox=(vw,vh)=>({width:Math.floor(vw*0.9), height:Math.floor(vh*0.9)});
+  scanner.start({facingMode:"environment"},{fps:12,qrbox:qrbox,aspectRatio:1.9},
     onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限","err"));
 }
 function onScan(text){
   const sku=text.trim().toUpperCase();
-  if(cur && sku===cur.sku) return;          // 同碼重複觸發 → 略過
+  if(cur && sku===cur.sku) return;
   const item=CFG.items[sku];
   if(!item){ return; }
-  loadItem(sku,item);                        // 掃到新碼 → 切換品項
+  loadItem(sku,item);
 }
 
 function loadItem(sku,item){
@@ -654,8 +645,8 @@ function applyMode(){
   else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; }
   else if(sec==="BP" && cur.spec){ const f=cur.spec.find(x=>x[0]===spec); mult=f?f[1]:1; }
   updateHint();
-  const beerWeigh=(sec==="YG" && weigh);    // 啤酒秤重欄是公式 → 停用 +1/-1
-  $("plusBtn").disabled=beerWeigh; $("minusBtn").disabled=beerWeigh;
+  const beerWeigh=(sec==="YG" && weigh);
+  document.querySelectorAll(".key.plus,.key.minus").forEach(b=>b.disabled=beerWeigh);
 }
 function updateHint(){
   const h=$("hint"); const w=parseFloat(disp);
@@ -669,12 +660,17 @@ function updateHint(){
   } else h.textContent="";
 }
 
-const KEYS=["1","2","3","4","5","6","7","8","9",".","0","⌫"];
+// 3×5：1-9 . 0 ⌫ ＋ 最後一列 +1 -1 輸入
+const KEYS=["1","2","3","4","5","6","7","8","9",".","0","⌫","+1","-1","輸入"];
 function renderPad(){
   const pad=$("pad"); pad.innerHTML="";
   KEYS.forEach(k=>{
     const b=document.createElement("button"); b.textContent=k; b.className="key";
-    b.onclick=()=>press(k); pad.appendChild(b);
+    if(k==="+1"){b.className+=" plus"; b.onclick=()=>submit("add",mult);}
+    else if(k==="-1"){b.className+=" minus"; b.onclick=()=>submit("add",-mult);}
+    else if(k==="輸入"){b.className+=" enter"; b.onclick=()=>press("輸入");}
+    else b.onclick=()=>press(k);
+    pad.appendChild(b);
   });
 }
 function press(k){
@@ -690,11 +686,8 @@ function press(k){
     } else submit("add",n*mult);
   }
 }
-function setDisp(v){ disp=v;
-  $("dval").innerHTML = v===""? '<span class="ph">0</span>' : v;
-}
+function setDisp(v){ disp=v; $("dval").innerHTML = v===""? '<span class="ph">0</span>' : v; }
 
-// +1 / -1 直接回傳，不顯示在輸入欄
 function submit(op,value){
   if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
   if(sending) return; sending=true;

@@ -23,8 +23,7 @@
 
   /* ② 相機（橫向長方形，固定在上方；下方完全不顯示相機） 27% */
   #reader{height:27dvh; width:100%; background:#000; overflow:hidden; position:relative;}
-  #reader video{width:100%!important; height:100%!important; object-fit:cover!important;}
-  #reader canvas, #reader img{max-height:100%!important;}
+  #reader video{object-fit:cover;}
   .scanning{position:absolute; left:9px; top:6px; z-index:6; font-size:11px; color:#9be8c8;
     background:rgba(13,17,23,.6); padding:2px 9px; border-radius:999px;}
 
@@ -588,15 +587,17 @@ function todayTab(){const d=new Date(); return ""+(d.getMonth()+1)+d.getDate();}
 // ---------- 相機：橫向、持續掃描，讀取範圍鎖在框內 ----------
 function startScan(){
   scanner=new Html5Qrcode("reader",{verbose:false});
-  const qrbox=(vw,vh)=>({width:Math.floor(vw*0.9), height:Math.floor(vh*0.9)});
-  scanner.start({facingMode:"environment"},{fps:12,qrbox:qrbox,aspectRatio:1.9},
-    onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限","err"));
+  const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.9); return {width:s,height:s}; };
+  scanner.start({facingMode:"environment"},{fps:10,qrbox:qrbox},
+    onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
 }
+let lastUnknown="";
 function onScan(text){
   const sku=text.trim().toUpperCase();
   if(cur && sku===cur.sku) return;
   const item=CFG.items[sku];
-  if(!item){ return; }
+  if(!item){ if(sku!==lastUnknown){ lastUnknown=sku; toast("讀到條碼，但查無此 SKU：\n"+sku,"err"); } return; }
+  lastUnknown="";
   loadItem(sku,item);
 }
 

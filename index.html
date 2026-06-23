@@ -16,7 +16,11 @@
   body{height:100dvh; overflow:hidden; display:flex; flex-direction:column;}
 
   /* ① 品名 5% */
-  .name{height:5dvh; padding:0 14px; display:flex; align-items:center; gap:9px; overflow:hidden;}
+  .name{height:5dvh; padding:0 10px 0 14px; display:flex; align-items:center; gap:8px; overflow:hidden;}
+  .nametext{flex:1; min-width:0; display:flex; align-items:baseline; gap:9px; overflow:hidden;}
+  .manualbtn{flex:0 0 auto; height:80%; padding:0 11px; border-radius:9px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink); font-size:clamp(11px,2vh,13px); font-weight:700; white-space:nowrap;}
+  .manualbtn:active{background:var(--pick);}
   .name b{font-size:clamp(15px,3vh,21px); font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .name .sku{font-size:clamp(11px,1.8vh,13px); color:var(--dim); font-variant-numeric:tabular-nums;}
   .name .empty{font-size:clamp(13px,2.4vh,16px); color:var(--dim); font-weight:600;}
@@ -26,6 +30,10 @@
   #reader video{object-fit:cover;}
   .scanning{position:absolute; left:9px; top:6px; z-index:6; font-size:11px; color:#9be8c8;
     background:rgba(13,17,23,.6); padding:2px 9px; border-radius:999px;}
+  .torch{position:absolute; right:9px; top:6px; z-index:7; width:36px; height:36px; border-radius:999px;
+    border:1px solid var(--line); background:rgba(13,17,23,.62); color:var(--ink);
+    font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;}
+  .torch.on{background:var(--warn); color:#1A1206; border-color:var(--warn);}
 
   /* ③ 位置 / 規格 17% */
   .optszone{height:17dvh; padding:5px 10px 0; display:flex; flex-direction:column; gap:5px; overflow:hidden;}
@@ -70,9 +78,15 @@
 </style>
 </head>
 <body>
-  <div class="name" id="nameBar"><span class="empty">對準條碼開始盤點</span></div>
+  <div class="name">
+    <div class="nametext" id="nameBar"><span class="empty">對準條碼開始盤點</span></div>
+    <button class="manualbtn" onclick="manualSku()">⌨ SKU</button>
+  </div>
 
-  <div id="reader"><span class="scanning">● 持續掃描中</span></div>
+  <div id="reader">
+    <span class="scanning">● 持續掃描中</span>
+    <button class="torch" id="torchBtn" onclick="toggleTorch()">燈</button>
+  </div>
 
   <div class="optszone">
     <div class="orow" id="posWrap" style="display:none">
@@ -569,7 +583,7 @@ const CFG = {
   },
   "15L": {
    "empty": 3,
-   "cap": 15
+   "cap": 10
   },
   "beer": {
    "empty": 6,
@@ -596,6 +610,22 @@ function startScan(){
     onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
 }
 let lastUnknown="";
+let torchOn=false;
+function toggleTorch(){
+  if(!scanner){ toast("相機尚未啟動","err"); return; }
+  torchOn=!torchOn;
+  scanner.applyVideoConstraints({advanced:[{torch:torchOn}]})
+    .then(()=>{ $("torchBtn").classList.toggle("on",torchOn); })
+    .catch(()=>{ torchOn=false; toast("此裝置不支援手電筒\n（iPhone Safari 通常不支援）","err"); });
+}
+function manualSku(){
+  const v=prompt("輸入 SKU（例如 JZ001、BP013）");
+  if(!v) return;
+  const sku=v.trim().toUpperCase();
+  const item=CFG.items[sku];
+  if(!item){ toast("查無此 SKU："+sku,"err"); return; }
+  lastUnknown=""; loadItem(sku,item);
+}
 function onScan(text){
   const sku=text.trim().toUpperCase();
   if(cur && sku===cur.sku) return;

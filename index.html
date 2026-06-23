@@ -627,12 +627,38 @@ function startScan(){
   if(typeof Html5QrcodeSupportedFormats!=="undefined") c.formatsToSupport=[Html5QrcodeSupportedFormats.QR_CODE]; // 只解 QR，加速
   scanner=new Html5Qrcode("reader",c);
   const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.92); return {width:s,height:s}; }; // 正方形
-  scanner.start(
-    { facingMode:"environment" },
-    { fps:15, qrbox:qrbox },
-    onScan,()=>{}
-  ).catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
-  keepCameraAlive();
+
+  // 1. 先取得所有授權的相機清單
+  Html5Qrcode.getCameras().then(devices => {
+    let targetCamera = { facingMode: "environment" }; // 預設配置：自動選擇後置鏡頭
+
+    // 2. 判斷是否為 iPhone
+    const isIPhone = /iPhone/i.test(navigator.userAgent);
+
+    if (isIPhone && devices && devices.length > 0) {
+      // 3. 尋找標籤中包含 "ultra wide" 或 "ultrawide" 的鏡頭 (不分大小寫)
+      const uwDevice = devices.find(d => 
+        d.label && (d.label.toLowerCase().includes("ultra wide") || d.label.toLowerCase().includes("ultrawide"))
+      );
+      
+      // 如果有找到超廣角鏡頭，將目標設為該鏡頭的 specific ID
+      if (uwDevice) {
+        targetCamera = uwDevice.id; 
+      }
+    }
+
+    // 4. 啟動相機
+    return scanner.start(
+      targetCamera,
+      { fps:15, qrbox:qrbox },
+      onScan,
+      ()=>{} // 忽略掃描失敗的 callback（避免洗畫面）
+    );
+  }).then(() => {
+    keepCameraAlive(); // 啟動成功後掛載看門狗
+  }).catch(e => {
+    toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err");
+  });
 }
 // 看門狗：相機若被任何原因暫停（含手動輸入、切到背景），自動恢復
 let camWatch=null;

@@ -584,7 +584,9 @@ const lastPos = JSON.parse(localStorage.getItem("lastPos")||"{}");
 const lastSpec = JSON.parse(localStorage.getItem("lastSpec")||"{}");
 
 function $(id){return document.getElementById(id);}
-function todayTab(){const d=new Date(); return ""+(d.getMonth()+1)+d.getDate();}
+function todayTab(){const d=new Date(Date.now()-8*3600*1000);
+  const m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
+  return m+day;}
 
 // ---------- 相機：橫向、持續掃描，讀取範圍鎖在框內 ----------
 function startScan(){

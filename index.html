@@ -26,8 +26,8 @@
   .name .empty{font-size:clamp(13px,2.4vh,16px); color:var(--dim); font-weight:600;}
 
   /* ② 相機（橫向長方形，固定在上方；下方完全不顯示相機） 27% */
-  #reader{height:27dvh; width:100%; background:#000; overflow:hidden; position:relative;}
-  #reader video{object-fit:cover;}
+  #reader{height:27dvh; width:27dvh; max-width:100%; margin:0 auto; background:#000; overflow:hidden; position:relative;}
+  #reader video{width:100%; height:100%; object-fit:cover;}
   .scanning{position:absolute; left:9px; top:6px; z-index:6; font-size:11px; color:#9be8c8;
     background:rgba(13,17,23,.6); padding:2px 9px; border-radius:999px;}
   .torch{position:absolute; right:9px; top:6px; z-index:7; width:36px; height:36px; border-radius:999px;
@@ -75,6 +75,14 @@
   .toast.ok{background:var(--accent); color:var(--accent-ink);}
   .toast.err{background:var(--bad); color:#1A0808;}
   .pending{position:fixed; right:10px; bottom:5px; z-index:40; font-size:11px; color:var(--warn); font-weight:600;}
+  .skumodal{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60; display:none; align-items:center; justify-content:center; padding:24px;}
+  .skubox{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; width:100%; max-width:340px; display:flex; flex-direction:column; gap:12px;}
+  .skutitle{font-size:16px; font-weight:800;}
+  .skubox input{padding:12px; border-radius:10px; border:1px solid var(--line); background:#0A0D12; color:var(--ink); font-size:18px; text-transform:uppercase; letter-spacing:1px;}
+  .skubtns{display:flex; gap:10px;}
+  .skubtns button{flex:1; padding:11px; border-radius:10px; border:1px solid var(--line); font-size:15px; font-weight:700;}
+  .skucancel{background:var(--panel); color:var(--ink);}
+  .skuok{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
 </style>
 </head>
 <body>
@@ -104,6 +112,17 @@
   <div class="blank"></div>
   <div class="toast" id="toast"></div>
   <div class="pending" id="pending"></div>
+
+  <div class="skumodal" id="skuModal">
+    <div class="skubox">
+      <div class="skutitle">手動輸入 SKU</div>
+      <input id="skuInput" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="例如 JZ001、BP013"/>
+      <div class="skubtns">
+        <button class="skucancel" onclick="closeSku()">取消</button>
+        <button class="skuok" onclick="confirmSku()">確定</button>
+      </div>
+    </div>
+  </div>
 
 <script>
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
@@ -602,13 +621,28 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
   const m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
   return m+day;}
 
-// ---------- 相機：橫向、持續掃描，讀取範圍鎖在框內 ----------
+// ---------- 相機：正方形讀取範圍、持續掃描、低光優化 ----------
 function startScan(){
-  scanner=new Html5Qrcode("reader",{verbose:false});
-  const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.9); return {width:s,height:s}; };
-  scanner.start({facingMode:"environment"},{fps:10,qrbox:qrbox},
-    onScan,()=>{}).catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
+  const c={ verbose:false, experimentalFeatures:{ useBarCodeDetectorIfSupported:true } };
+  if(typeof Html5QrcodeSupportedFormats!=="undefined") c.formatsToSupport=[Html5QrcodeSupportedFormats.QR_CODE]; // 只解 QR，加速
+  scanner=new Html5Qrcode("reader",c);
+  const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.92); return {width:s,height:s}; }; // 正方形
+  scanner.start(
+    { facingMode:"environment", width:{ideal:1280}, height:{ideal:1280}, advanced:[{focusMode:"continuous"}] },
+    { fps:15, qrbox:qrbox },
+    onScan,()=>{}
+  ).catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
+  keepCameraAlive();
 }
+// 看門狗：相機若被任何原因暫停（含手動輸入、切到背景），自動恢復
+let camWatch=null;
+function keepCameraAlive(){
+  if(camWatch) clearInterval(camWatch);
+  camWatch=setInterval(()=>{ const v=document.querySelector("#reader video"); if(v && v.paused){ v.play().catch(()=>{}); } },1500);
+}
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden){ const v=document.querySelector("#reader video"); if(v && v.paused) v.play().catch(()=>{}); }
+});
 let lastUnknown="";
 let torchOn=false;
 function toggleTorch(){
@@ -619,9 +653,14 @@ function toggleTorch(){
     .catch(()=>{ torchOn=false; toast("此裝置不支援手電筒\n（iPhone Safari 通常不支援）","err"); });
 }
 function manualSku(){
-  const v=prompt("輸入 SKU（例如 JZ001、BP013）");
-  if(!v) return;
-  const sku=v.trim().toUpperCase();
+  $("skuModal").style.display="flex";
+  const i=$("skuInput"); i.value=""; setTimeout(()=>i.focus(),50);
+}
+function closeSku(){ $("skuModal").style.display="none"; }
+function confirmSku(){
+  const sku=$("skuInput").value.trim().toUpperCase();
+  closeSku();
+  if(!sku) return;
   const item=CFG.items[sku];
   if(!item){ toast("查無此 SKU："+sku,"err"); return; }
   lastUnknown=""; loadItem(sku,item);
@@ -755,6 +794,7 @@ function toast(msg,type){ const t=$("toast"); t.textContent=msg; t.className="to
   clearTimeout(tTimer); tTimer=setTimeout(()=>t.className="toast "+type,2600); }
 
 renderPad();
+$("skuInput").addEventListener("keydown",e=>{ if(e.key==="Enter") confirmSku(); });
 startScan();
 </script>
 </body>

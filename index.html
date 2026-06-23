@@ -66,6 +66,7 @@
   .toast.show{opacity:1;}
   .toast.ok{background:var(--accent); color:var(--accent-ink);}
   .toast.err{background:var(--bad); color:#1A0808;}
+  .pending{position:fixed; right:10px; bottom:5px; z-index:40; font-size:11px; color:var(--warn); font-weight:600;}
 </style>
 </head>
 <body>
@@ -88,6 +89,7 @@
 
   <div class="blank"></div>
   <div class="toast" id="toast"></div>
+  <div class="pending" id="pending"></div>
 
 <script>
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
@@ -577,7 +579,7 @@ const CFG = {
 };
 const F = CFG.formulas;
 let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
-let scanner=null, sending=false;
+let scanner=null;
 const lastPos = JSON.parse(localStorage.getItem("lastPos")||"{}");
 const lastSpec = JSON.parse(localStorage.getItem("lastSpec")||"{}");
 
@@ -689,25 +691,32 @@ function press(k){
 }
 function setDisp(v){ disp=v; $("dval").innerHTML = v===""? '<span class="ph">0</span>' : v; }
 
+// 送出＝立刻回饋並排入背景佇列；佇列一次送一筆（序列化，避免 +1 連點互蓋）
+const sendQueue=[]; let flushing=false;
 function submit(op,value){
   if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
-  if(sending) return; sending=true;
+  const shown=op==="set"?Number(value).toFixed(3):(value>0?"+":"")+value;
   const payload={sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
     header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab()};
-  toast("傳送中…","ok");
+  sendQueue.push(payload); updatePending(); processQueue();
+  toast("✓ "+cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown,"ok");  // 立刻回饋，不等後端
+  setDisp("");
+}
+function processQueue(){
+  if(flushing || sendQueue.length===0) return;
+  flushing=true;
+  const payload=sendQueue[0];
   fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify(payload)})
     .then(async r=>{ const txt=await r.text();
       try{ return JSON.parse(txt); }
-      catch(e){ throw new Error("回應不是 JSON（權限或未部署）：\n"+txt.slice(0,90)); } })
-    .then(res=>{ sending=false;
-      if(res.success){
-        const shown=op==="set"?Number(value).toFixed(3):(value>0?"+":"")+value;
-        toast("✓ "+cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown+"\n合計 "+(res.total??"-"),"ok");
-        setDisp("");
-      } else toast("✗ "+(res.error||"寫入失敗"),"err");
-    })
-    .catch(e=>{ sending=false; toast("✗ "+e.message,"err"); console.log("submit error",e); });
+      catch(e){ throw new Error("回應非 JSON（權限或未部署）"); } })
+    .then(res=>{ sendQueue.shift(); flushing=false; updatePending();
+      if(!res.success) toast("✗ "+payload.name+"："+(res.error||"寫入失敗"),"err");
+      processQueue(); })
+    .catch(e=>{ sendQueue.shift(); flushing=false; updatePending();
+      toast("✗ "+payload.name+" 寫入失敗："+e.message,"err"); processQueue(); });
 }
+function updatePending(){ $("pending").textContent = sendQueue.length ? "● 待傳 "+sendQueue.length : ""; }
 
 let tTimer=null;
 function toast(msg,type){ const t=$("toast"); t.textContent=msg; t.className="toast "+type+" show";

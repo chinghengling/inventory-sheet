@@ -628,7 +628,7 @@ function startScan(){
   scanner=new Html5Qrcode("reader",c);
   const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.92); return {width:s,height:s}; }; // 正方形
   scanner.start(
-    { facingMode:"environment", width:{ideal:1280}, height:{ideal:1280}, advanced:[{focusMode:"continuous"}] },
+    { facingMode:"environment" },
     { fps:15, qrbox:qrbox },
     onScan,()=>{}
   ).catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));

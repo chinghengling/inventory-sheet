@@ -621,44 +621,27 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
   const m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
   return m+day;}
 
-// ---------- 相機：正方形讀取範圍、持續掃描、低光優化 ----------
+// ---------- 相機：超廣角優先(iPhone) + 720p + 正方形讀取 + 持續掃描 ----------
 function startScan(){
   const c={ verbose:false, experimentalFeatures:{ useBarCodeDetectorIfSupported:true } };
   if(typeof Html5QrcodeSupportedFormats!=="undefined") c.formatsToSupport=[Html5QrcodeSupportedFormats.QR_CODE]; // 只解 QR，加速
   scanner=new Html5Qrcode("reader",c);
   const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.92); return {width:s,height:s}; }; // 正方形
 
-  // 1. 先取得所有授權的相機清單
-  Html5Qrcode.getCameras().then(devices => {
-    let targetCamera = { facingMode: "environment" }; // 預設配置：自動選擇後置鏡頭
-
-    // 2. 判斷是否為 iPhone
-    const isIPhone = /iPhone/i.test(navigator.userAgent);
-
-    if (isIPhone && devices && devices.length > 0) {
-      // 3. 尋找標籤中包含 "ultra wide" 或 "ultrawide" 的鏡頭 (不分大小寫)
-      const uwDevice = devices.find(d => 
-        d.label && (d.label.toLowerCase().includes("ultra wide") || d.label.toLowerCase().includes("ultrawide"))
-      );
-      
-      // 如果有找到超廣角鏡頭，將目標設為該鏡頭的 specific ID
-      if (uwDevice) {
-        targetCamera = uwDevice.id; 
-      }
+  Html5Qrcode.getCameras().then(devices=>{
+    const isIPhone=/iPhone/i.test(navigator.userAgent);
+    // 預設後鏡頭；iPhone 若有超廣角鏡頭就優先用（近距離對焦最好）
+    let vc={ facingMode:{ ideal:"environment" } };
+    if(isIPhone && devices && devices.length){
+      const uw=devices.find(d=> d.label && /ultra\s?wide/i.test(d.label));
+      if(uw) vc={ deviceId:{ exact:uw.id } };
     }
-
-    // 4. 啟動相機
-    return scanner.start(
-      targetCamera,
-      { fps:15, qrbox:qrbox },
-      onScan,
-      ()=>{} // 忽略掃描失敗的 callback（避免洗畫面）
-    );
-  }).then(() => {
-    keepCameraAlive(); // 啟動成功後掛載看門狗
-  }).catch(e => {
-    toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err");
-  });
+    vc.width={ ideal:1280 };   // 720p（解析度放 videoConstraints，不能放第一參數）
+    vc.height={ ideal:720 };
+    const firstArg = vc.deviceId ? vc.deviceId.exact : { facingMode:"environment" };
+    return scanner.start(firstArg, { fps:30, qrbox:qrbox, videoConstraints:vc }, onScan, ()=>{});
+  }).then(()=>{ keepCameraAlive(); })
+    .catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
 }
 // 看門狗：相機若被任何原因暫停（含手動輸入、切到背景），自動恢復
 let camWatch=null;

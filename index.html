@@ -621,18 +621,28 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
   const m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
   return m+day;}
 
-// ---------- 相機：主鏡頭(自動對焦) + 正方形讀取 + 持續掃描 ----------
+// ---------- 相機：超廣角優先(iPhone) + 正方形讀取 + 持續掃描 ----------
 function startScan(){
   const c={ verbose:false, experimentalFeatures:{ useBarCodeDetectorIfSupported:true } };
-  if(typeof Html5QrcodeSupportedFormats!=="undefined") c.formatsToSupport=[Html5QrcodeSupportedFormats.QR_CODE]; // 只解 QR，加速
+  if(typeof Html5QrcodeSupportedFormats!=="undefined") c.formatsToSupport=[Html5QrcodeSupportedFormats.QR_CODE]; // 只解 QR
   scanner=new Html5Qrcode("reader",c);
   const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.92); return {width:s,height:s}; }; // 正方形
-  scanner.start(
-    { facingMode:"environment" },          // 主後鏡頭，網頁端自動對焦最可靠
-    { fps:15, qrbox:qrbox },
-    onScan,()=>{}
-  ).then(()=>{ keepCameraAlive(); })
-   .catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
+
+  Html5Qrcode.getCameras().then(devices=>{
+    let targetCamera={ facingMode:"environment" };          // 預設後鏡頭
+    const isIPhone=/iPhone/i.test(navigator.userAgent);
+    if(isIPhone && devices && devices.length>0){
+      const uw=devices.find(d=> d.label &&
+        (d.label.toLowerCase().includes("ultra wide") || d.label.toLowerCase().includes("ultrawide")));
+      if(uw) targetCamera=uw.id;                            // 超廣角（近距離對焦最符合實際使用）
+    }
+    return scanner.start(
+      targetCamera,
+      { fps:15, qrbox:qrbox, disableFlip:true },            // disableFlip：不再試鏡像版本，解碼約快一倍
+      onScan, ()=>{}
+    );
+  }).then(()=>{ keepCameraAlive(); })
+    .catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
 }
 // 看門狗：相機若被任何原因暫停（含手動輸入、切到背景），自動恢復
 let camWatch=null;

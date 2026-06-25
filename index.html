@@ -621,27 +621,18 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
   const m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
   return m+day;}
 
-// ---------- 相機：超廣角優先(iPhone) + 720p + 正方形讀取 + 持續掃描 ----------
+// ---------- 相機：主鏡頭(自動對焦) + 正方形讀取 + 持續掃描 ----------
 function startScan(){
   const c={ verbose:false, experimentalFeatures:{ useBarCodeDetectorIfSupported:true } };
   if(typeof Html5QrcodeSupportedFormats!=="undefined") c.formatsToSupport=[Html5QrcodeSupportedFormats.QR_CODE]; // 只解 QR，加速
   scanner=new Html5Qrcode("reader",c);
   const qrbox=(vw,vh)=>{ const s=Math.floor(Math.min(vw,vh)*0.92); return {width:s,height:s}; }; // 正方形
-
-  Html5Qrcode.getCameras().then(devices=>{
-    const isIPhone=/iPhone/i.test(navigator.userAgent);
-    // 預設後鏡頭；iPhone 若有超廣角鏡頭就優先用（近距離對焦最好）
-    let vc={ facingMode:{ ideal:"environment" } };
-    if(isIPhone && devices && devices.length){
-      const uw=devices.find(d=> d.label && /ultra\s?wide/i.test(d.label));
-      if(uw) vc={ deviceId:{ exact:uw.id } };
-    }
-    vc.width={ ideal:1280 };   // 720p（解析度放 videoConstraints，不能放第一參數）
-    vc.height={ ideal:720 };
-    const firstArg = vc.deviceId ? vc.deviceId.exact : { facingMode:"environment" };
-    return scanner.start(firstArg, { fps:30, qrbox:qrbox, videoConstraints:vc }, onScan, ()=>{});
-  }).then(()=>{ keepCameraAlive(); })
-    .catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
+  scanner.start(
+    { facingMode:"environment" },          // 主後鏡頭，網頁端自動對焦最可靠
+    { fps:15, qrbox:qrbox },
+    onScan,()=>{}
+  ).then(()=>{ keepCameraAlive(); })
+   .catch(e=>toast("相機啟動失敗，請確認已允許相機權限：\n"+e,"err"));
 }
 // 看門狗：相機若被任何原因暫停（含手動輸入、切到背景），自動恢復
 let camWatch=null;

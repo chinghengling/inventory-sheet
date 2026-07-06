@@ -25,7 +25,7 @@
   .name .sku{font-size:clamp(11px,1.8vh,13px); color:var(--dim); font-variant-numeric:tabular-nums;}
   .name .empty{font-size:clamp(13px,2.4vh,16px); color:var(--dim); font-weight:600;}
 
-  /* ② 相機（橫向長方形，固定在上方；下方完全不顯示相機） 27% */
+  /* ② 相機（正方形，固定在上方） 27% */
   #reader{height:27dvh; width:27dvh; max-width:100%; margin:0 auto; background:#000; overflow:hidden; position:relative;}
   #reader video{width:100%; height:100%; object-fit:cover;}
   .scanning{position:absolute; left:9px; top:6px; z-index:6; font-size:11px; color:#9be8c8;
@@ -74,7 +74,8 @@
   .toast.show{opacity:1;}
   .toast.ok{background:var(--accent); color:var(--accent-ink);}
   .toast.err{background:var(--bad); color:#1A0808;}
-  .pending{position:fixed; right:10px; bottom:5px; z-index:40; font-size:11px; color:var(--warn); font-weight:600;}
+  .pending{position:fixed; right:10px; bottom:5px; z-index:40; font-size:11px; font-weight:600; color:var(--warn);}
+  .pending .fail{color:var(--bad); text-decoration:underline; pointer-events:auto;}
   .skumodal{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60; display:none; align-items:center; justify-content:center; padding:24px;}
   .skubox{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; width:100%; max-width:340px; display:flex; flex-direction:column; gap:12px;}
   .skutitle{font-size:16px; font-weight:800;}
@@ -129,18 +130,34 @@
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzgw2AkYQVMekLlNDyRbo3ts5jNjbiSb2V8ajpeG1FisyfHwVyG9QPPLPB8487OXR0qEQ/exec";
 // =================================================================
 
+/* =====================================================================
+ * 設定區總覽（給之後維護的人看）：
+ *  A. SUFFIX_POS   位置後綴對照表（QR碼後兩碼 → 位置名稱）— 手動維護
+ *  B. CFG.sections 四大區段設定 — 幾乎不需要改
+ *  C. CFG.items    品項清單 — 由 update_config.py 從「盤點總表.xlsx」自動生成
+ *                  （在標記 CFG-ITEMS-START / CFG-ITEMS-END 之間，請勿手動改）
+ *  D. CFG.formulas 秤重換算參數 — 手動維護
+ * 位置名稱必須與 Google Sheet 日盤表的欄位名稱一字不差！
+ * ===================================================================== */
+
+// ---- A. 位置後綴對照表（可手動編輯） ----
+const SUFFIX_POS = {
+  "JZ": { "JI":"吧檯插管", "JO":"吧檯未插", "BI":"吧檯插管", "BO":"吧檯未插",
+          "YG":"酉鬼", "JT":"橘桶", "1F":"一倉冰箱", "LF":"烘焙T左冰箱" },
+  "HB": { "BI":"吧檯插管", "BO":"吧檯未插", "PF":"POS冰箱", "DF":"DJ冰箱",
+          "LF":"T區冰箱左", "RF":"T區冰箱右", "1F":"一倉冰箱" },
+  "YG": { "YI":"冰箱插管", "YO":"冰箱未插", "1N":"倉庫", "YN":"酉鬼內未冰" },
+  "BP": { "YG":"酉鬼", "JZ":"假裝現場", "HB":"烘焙現場",
+          "SA":"小倉(一店)", "SB":"小倉(二店)", "1N":"一倉" }
+};
+
+// ---- B. 區段設定（幾乎不需要改） ----
 const CFG = {
  "sections": {
   "JZ": {
    "block": "假裝清醒",
    "kind": "cocktail",
-   "positions": [
-    "吧檯插管",
-    "吧檯未插",
-    "酉鬼",
-    "橘桶",
-    "一倉冰箱"
-   ],
+   "positions": ["吧檯插管","吧檯未插","酉鬼","橘桶","一倉冰箱","烘焙T左冰箱"],
    "tap": "吧檯插管",
    "sig": "橘桶",
    "header": "品名"
@@ -148,14 +165,7 @@ const CFG = {
   "HB": {
    "block": "烘焙雲",
    "kind": "cocktail",
-   "positions": [
-    "吧檯插管",
-    "吧檯未插",
-    "POS冰箱",
-    "DJ冰箱",
-    "T區冰箱左",
-    "一倉冰箱"
-   ],
+   "positions": ["吧檯插管","吧檯未插","POS冰箱","DJ冰箱","T區冰箱左","T區冰箱右","一倉冰箱"],
    "tap": "吧檯插管",
    "sig": "POS冰箱",
    "header": "品名"
@@ -163,12 +173,7 @@ const CFG = {
   "YG": {
    "block": "酉鬼",
    "kind": "beer",
-   "positions": [
-    "冰箱插管",
-    "冰箱未插",
-    "倉庫",
-    "酉鬼內未冰"
-   ],
+   "positions": ["冰箱插管","冰箱未插","倉庫","酉鬼內未冰"],
    "tap": "冰箱插管",
    "weighCol": "秤重",
    "sig": "酉鬼內未冰",
@@ -181,435 +186,68 @@ const CFG = {
    "sig": "備品"
   }
  },
- "items": {
-  "JZ001": {
-   "name": "Mango Yellow",
-   "sec": "JZ"
-  },
-  "JZ002": {
-   "name": "Pichi Pichi",
-   "sec": "JZ"
-  },
-  "JZ003": {
-   "name": "Honey Yuzu",
-   "sec": "JZ"
-  },
-  "JZ004": {
-   "name": "Strawberry No5",
-   "sec": "JZ"
-  },
-  "JZ005": {
-   "name": "Skittles",
-   "sec": "JZ"
-  },
-  "JZ006": {
-   "name": "bando",
-   "sec": "JZ"
-  },
-  "JZ007": {
-   "name": "Hawaii Tea Sour",
-   "sec": "JZ"
-  },
-  "JZ008": {
-   "name": "Play Gum",
-   "sec": "JZ"
-  },
-  "JZ009": {
-   "name": "Mocktail",
-   "sec": "JZ"
-  },
-  "JZ010": {
-   "name": "活動調酒(大)",
-   "sec": "JZ"
-  },
-  "HB001": {
-   "name": "Sangria Sherry",
-   "sec": "HB"
-  },
-  "HB002": {
-   "name": "Rose Sour",
-   "sec": "HB"
-  },
-  "HB003": {
-   "name": "Jasmin Spritz",
-   "sec": "HB"
-  },
-  "HB004": {
-   "name": "Pineapple Punch",
-   "sec": "HB"
-  },
-  "HB005": {
-   "name": "Baisl Breeze",
-   "sec": "HB"
-  },
-  "HB006": {
-   "name": "Rabbit Fruit",
-   "sec": "HB"
-  },
-  "HB007": {
-   "name": "Orange Day",
-   "sec": "HB"
-  },
-  "HB008": {
-   "name": "Sober Ice Tea",
-   "sec": "HB"
-  },
-  "HB009": {
-   "name": "Mocktail",
-   "sec": "HB"
-  },
-  "HB010": {
-   "name": "活動調酒(大)",
-   "sec": "HB"
-  },
-  "YG001": {
-   "name": "戀夏365",
-   "sec": "YG"
-  },
-  "YG002": {
-   "name": "芭樂鹽小麥",
-   "sec": "YG"
-  },
-  "YG003": {
-   "name": "醜啤",
-   "sec": "YG"
-  },
-  "YG004": {
-   "name": "撥雲霧見蓬萊仙島",
-   "sec": "YG"
-  },
-  "YG005": {
-   "name": "吐司去邊大冰紅",
-   "sec": "YG"
-  },
-  "YG006": {
-   "name": "酒花蘋果",
-   "sec": "YG"
-  },
-  "YG007": {
-   "name": "空桶",
-   "sec": "YG",
-   "countOnly": true
-  },
-  "BP001": {
-   "name": "CO2大",
-   "sec": "BP",
-   "positions": [
-    "一倉"
-   ]
-  },
-  "BP002": {
-   "name": "CO2小",
-   "sec": "BP",
-   "positions": [
-    "一倉"
-   ]
-  },
-  "BP003": {
-   "name": "空桶數量",
-   "sec": "BP",
-   "positions": [
-    "一倉"
-   ]
-  },
-  "BP004": {
-   "name": "彩虹糖",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "小倉(一店)"
-   ]
-  },
-  "BP005": {
-   "name": "飛機餅乾",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ]
-  },
-  "BP006": {
-   "name": "9*9衛生紙",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)",
-    "一倉"
-   ],
-   "spec": [
-    [
-     "箱",
-     36
-    ],
-    [
-     "包",
-     1
-    ]
-   ]
-  },
-  "BP007": {
-   "name": "擦手紙",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ],
-   "spec": [
-    [
-     "箱",
-     20
-    ],
-    [
-     "包",
-     1
-    ]
-   ]
-  },
-  "BP008": {
-   "name": "粉紅垃圾袋",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)",
-    "小倉(二店)"
-   ]
-  },
-  "BP009": {
-   "name": "大垃圾袋",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)",
-    "小倉(二店)"
-   ]
-  },
-  "BP010": {
-   "name": "咖啡抹布",
-   "sec": "BP",
-   "positions": [
-    "小倉(一店)",
-    "小倉(二店)"
-   ]
-  },
-  "BP011": {
-   "name": "白抹布",
-   "sec": "BP",
-   "positions": [
-    "小倉(一店)",
-    "小倉(二店)"
-   ],
-   "spec": [
-    [
-     "包",
-     12
-    ],
-    [
-     "條",
-     1
-    ]
-   ]
-  },
-  "BP012": {
-   "name": "口布",
-   "sec": "BP",
-   "positions": [
-    "小倉(一店)",
-    "小倉(二店)"
-   ]
-  },
-  "BP013": {
-   "name": "PLA大",
-   "sec": "BP",
-   "positions": [
-    "酉鬼",
-    "一倉"
-   ],
-   "spec": [
-    [
-     "箱",
-     500
-    ],
-    [
-     "杯",
-     1
-    ]
-   ]
-  },
-  "BP014": {
-   "name": "PLA小",
-   "sec": "BP",
-   "positions": [
-    "酉鬼",
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)",
-    "一倉"
-   ],
-   "spec": [
-    [
-     "箱",
-     500
-    ],
-    [
-     "杯",
-     1
-    ]
-   ]
-  },
-  "BP015": {
-   "name": "威杯",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ],
-   "spec": [
-    [
-     "盒",
-     6
-    ],
-    [
-     "個",
-     1
-    ]
-   ]
-  },
-  "BP016": {
-   "name": "Highball杯",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ],
-   "spec": [
-    [
-     "盒",
-     6
-    ],
-    [
-     "個",
-     1
-    ]
-   ]
-  },
-  "BP017": {
-   "name": "Shot杯",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ],
-   "spec": [
-    [
-     "盒",
-     12
-    ],
-    [
-     "個",
-     1
-    ]
-   ]
-  },
-  "BP018": {
-   "name": "蠟燭杯",
-   "sec": "BP",
-   "positions": [
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ]
-  },
-  "BP019": {
-   "name": "蠟燭",
-   "sec": "BP",
-   "positions": [
-    "小倉(二店)"
-   ],
-   "spec": [
-    [
-     "盒",
-     100
-    ],
-    [
-     "入",
-     1
-    ]
-   ]
-  },
-  "BP020": {
-   "name": "大紙捲",
-   "sec": "BP",
-   "positions": [
-    "酉鬼",
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ]
-  },
-  "BP021": {
-   "name": "國泰紙捲",
-   "sec": "BP",
-   "positions": [
-    "酉鬼",
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ],
-   "spec": [
-    [
-     "條",
-     5
-    ],
-    [
-     "個",
-     1
-    ]
-   ]
-  },
-  "BP022": {
-   "name": "聯合紙捲",
-   "sec": "BP",
-   "positions": [
-    "酉鬼",
-    "假裝現場",
-    "烘焙現場",
-    "小倉(一店)"
-   ],
-   "spec": [
-    [
-     "條",
-     3
-    ],
-    [
-     "個",
-     1
-    ]
-   ]
-  }
- },
+ "items": {},
  "formulas": {
-  "10L": {
-   "empty": 2.45,
-   "cap": 10
-  },
-  "15L": {
-   "empty": 3,
-   "cap": 10
-  },
-  "beer": {
-   "empty": 6,
-   "cap": 20
-  }
+  "10L": { "empty": 2.45, "cap": 10 },
+  "15L": { "empty": 3, "cap": 10 },
+  "beer": { "empty": 6, "cap": 20 }
  }
 };
+
+// ===== CFG-ITEMS-START =====（此區塊由 update_config.py 自動生成，請勿手動修改）
+CFG.items = {
+  "JZ001": {"name":"Mango Yellow","sec":"JZ"},
+  "JZ002": {"name":"Pichi Pichi","sec":"JZ"},
+  "JZ003": {"name":"Honey Yuzu","sec":"JZ"},
+  "JZ004": {"name":"Strawberry No5","sec":"JZ"},
+  "JZ005": {"name":"Skittles","sec":"JZ"},
+  "JZ006": {"name":"bando","sec":"JZ"},
+  "JZ007": {"name":"Hawaii Tea Sour","sec":"JZ"},
+  "JZ008": {"name":"Play Gum","sec":"JZ"},
+  "JZ009": {"name":"Mocktail","sec":"JZ"},
+  "JZ010": {"name":"活動調酒(大)","sec":"JZ"},
+  "HB001": {"name":"Sangria Sherry","sec":"HB"},
+  "HB002": {"name":"Rose Sour","sec":"HB"},
+  "HB003": {"name":"Jasmin Spritz","sec":"HB"},
+  "HB004": {"name":"Pineapple Punch","sec":"HB"},
+  "HB005": {"name":"Baisl Breeze","sec":"HB"},
+  "HB006": {"name":"Rabbit Fruit","sec":"HB"},
+  "HB007": {"name":"Orange Day","sec":"HB"},
+  "HB008": {"name":"Sober Ice Tea","sec":"HB"},
+  "HB009": {"name":"Mocktail","sec":"HB"},
+  "HB010": {"name":"活動調酒(大)","sec":"HB"},
+  "YG001": {"name":"戀夏365","sec":"YG"},
+  "YG002": {"name":"芭樂鹽小麥","sec":"YG"},
+  "YG003": {"name":"醜啤","sec":"YG"},
+  "YG004": {"name":"撥雲霧見蓬萊仙島","sec":"YG"},
+  "YG005": {"name":"吐司去邊大冰紅","sec":"YG"},
+  "YG006": {"name":"酒花蘋果","sec":"YG"},
+  "YG007": {"name":"空桶","sec":"YG","countOnly":true},
+  "BP001": {"name":"CO2大","sec":"BP","positions":["一倉"]},
+  "BP002": {"name":"CO2小","sec":"BP","positions":["一倉"]},
+  "BP003": {"name":"空桶數量","sec":"BP","positions":["一倉"]},
+  "BP004": {"name":"彩虹糖","sec":"BP","positions":["假裝現場","小倉(一店)"]},
+  "BP005": {"name":"飛機餅乾","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"]},
+  "BP006": {"name":"9*9衛生紙","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",36],["包",1]]},
+  "BP007": {"name":"擦手紙","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["箱",20],["包",1]]},
+  "BP008": {"name":"粉紅垃圾袋","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","小倉(二店)"]},
+  "BP009": {"name":"大垃圾袋","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","小倉(二店)"]},
+  "BP010": {"name":"咖啡抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
+  "BP011": {"name":"白抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"],"spec":[["包",12],["條",1]]},
+  "BP012": {"name":"口布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
+  "BP013": {"name":"PLA大","sec":"BP","positions":["酉鬼","一倉"],"spec":[["箱",500],["杯",1]]},
+  "BP014": {"name":"PLA小","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",500],["杯",1]]},
+  "BP015": {"name":"威杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",6],["個",1]]},
+  "BP016": {"name":"Highball杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",6],["個",1]]},
+  "BP017": {"name":"Shot杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",12],["個",1]]},
+  "BP018": {"name":"蠟燭杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"]},
+  "BP019": {"name":"蠟燭","sec":"BP","positions":["小倉(二店)"],"spec":[["盒",100],["入",1]]},
+  "BP020": {"name":"大紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"]},
+  "BP021": {"name":"國泰紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",5],["個",1]]},
+  "BP022": {"name":"聯合紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",3],["個",1]]}
+};
+// ===== CFG-ITEMS-END =====
+
 const F = CFG.formulas;
 let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
 let scanner=null;
@@ -651,7 +289,10 @@ function keepCameraAlive(){
   camWatch=setInterval(()=>{ const v=document.querySelector("#reader video"); if(v && v.paused){ v.play().catch(()=>{}); } },1500);
 }
 document.addEventListener("visibilitychange",()=>{
-  if(!document.hidden){ const v=document.querySelector("#reader video"); if(v && v.paused) v.play().catch(()=>{}); }
+  if(!document.hidden){
+    const v=document.querySelector("#reader video"); if(v && v.paused) v.play().catch(()=>{});
+    processQueue();  // 回到前景時，若有待傳項目立刻續傳
+  }
 });
 let lastUnknown="";
 let torchOn=false;
@@ -668,30 +309,53 @@ function manualSku(){
 }
 function closeSku(){ $("skuModal").style.display="none"; }
 function confirmSku(){
-  const sku=$("skuInput").value.trim().toUpperCase();
+  const code=$("skuInput").value.trim().toUpperCase();
   closeSku();
-  if(!sku) return;
-  const item=CFG.items[sku];
-  if(!item){ toast("查無此 SKU："+sku,"err"); return; }
-  lastUnknown=""; loadItem(sku,item);
+  if(!code) return;
+  if(!applyCode(code,true)) toast("查無此 SKU："+code,"err");
+}
+
+// ---------- 掃碼：支援「SKU＋兩碼位置後綴」自動帶入位置 ----------
+// 條碼格式：兩碼英文＋三碼數字（＋可選兩碼位置後綴），例如 JZ001、HB003DF、BP012SA
+let lastApplied="";   // 已套用過的完整條碼，避免持續掃描重複觸發
+function parseCode(code){
+  const m=code.match(/^([A-Z]{2}\d{3})([A-Z0-9]{2})?$/);
+  return m ? {base:m[1], suf:m[2]||null} : {base:code, suf:null};
+}
+function applyCode(code,manual){
+  const {base,suf}=parseCode(code);
+  const item=CFG.items[base];
+  if(!item) return false;
+  lastUnknown=""; lastApplied=code;
+  if(!(cur && cur.sku===base)) loadItem(base,item);
+  if(suf){
+    const posName=(SUFFIX_POS[item.sec]||{})[suf];
+    const positions=item.positions||CFG.sections[item.sec].positions;
+    if(posName && positions.includes(posName)){
+      if(pos!==posName) selectPos(posName);
+    }else{
+      toast("後綴「"+suf+"」沒有對應位置，請手動選擇","err");
+    }
+  }
+  return true;
 }
 function onScan(text){
-  const sku=text.trim().toUpperCase();
-  if(cur && sku===cur.sku) return;
-  const item=CFG.items[sku];
-  if(!item){ if(sku!==lastUnknown){ lastUnknown=sku; toast("讀到條碼，但查無此 SKU：\n"+sku,"err"); } return; }
-  lastUnknown="";
-  loadItem(sku,item);
+  const code=text.trim().toUpperCase();
+  if(code===lastApplied) return;                       // 同一張標籤持續入鏡：不重複處理
+  if(!applyCode(code,false)){
+    if(code!==lastUnknown){ lastUnknown=code; toast("讀到條碼，但查無此 SKU：\n"+code,"err"); }
+  }
 }
 
 function loadItem(sku,item){
   cur={sku,...item}; sec=item.sec; disp="";
   $("nameBar").innerHTML='<b>'+item.name+'</b><span class="sku">'+sku+'</span>';
-  const positions = sec==="BP" ? item.positions : CFG.sections[sec].positions;
+  const positions = item.positions || CFG.sections[sec].positions;
   const row=$("posRow"); row.innerHTML="";
   positions.forEach(p=>{
     const b=document.createElement("button"); b.className="opt"; b.textContent=p;
-    b.onclick=()=>selectPos(p); row.appendChild(b);
+    b.onclick=()=>{ lastApplied=""; selectPos(p); };   // 手動改位置後，重掃同一張標籤仍可再套用
+    row.appendChild(b);
   });
   $("posWrap").style.display="flex";
   const def=(lastPos[sec] && positions.includes(lastPos[sec]))?lastPos[sec]:positions[0];
@@ -772,32 +436,73 @@ function press(k){
 }
 function setDisp(v){ disp=v; $("dval").innerHTML = v===""? '<span class="ph">0</span>' : v; }
 
-// 送出＝立刻回饋並排入背景佇列；佇列一次送一筆（序列化，避免 +1 連點互蓋）
-const sendQueue=[]; let flushing=false;
+/* ---------- 送出與佇列（穩定性強化版） ----------
+ * 1. 佇列持久化到 localStorage：中途關頁面/鎖屏，重開後自動續傳，不遺失
+ * 2. 網路錯誤不丟棄：留在佇列，指數退避自動重試（1.5s→3s→6s…最長30s）
+ * 3. 後端邏輯錯誤（找不到品項/欄位）：不會自動好，移入「失敗清單」供查看
+ * 4. 每筆帶唯一 uid，後端去重：重試不會造成 +1 重複累加
+ * 5. 右下角狀態：● 待傳 N ／ ⟳ 重試中 ／ ✗ 失敗 N（點擊可查看與清除）
+ */
+let sendQueue=[], failedList=[];
+try{ sendQueue=JSON.parse(localStorage.getItem("sendQueue")||"[]"); }catch(e){ sendQueue=[]; }
+try{ failedList=JSON.parse(localStorage.getItem("failedList")||"[]"); }catch(e){ failedList=[]; }
+let flushing=false, retryCount=0, retryTimer=null;
+function saveQ(){
+  localStorage.setItem("sendQueue",JSON.stringify(sendQueue));
+  localStorage.setItem("failedList",JSON.stringify(failedList));
+}
+function newUid(){ return Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8); }
+
 function submit(op,value){
   if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
   const shown=op==="set"?Number(value).toFixed(3):(value>0?"+":"")+value;
-  const payload={sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
-    header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab()};
-  sendQueue.push(payload); updatePending(); processQueue();
-  toast("✓ "+cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown,"ok");  // 立刻回饋，不等後端
+  const payload={uid:newUid(),sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
+    header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab(),
+    label:cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown};
+  sendQueue.push(payload); saveQ(); updatePending(); processQueue();
+  toast("✓ "+payload.label,"ok");  // 立刻回饋；若之後傳送失敗會自動重試並在右下角顯示
   setDisp("");
 }
 function processQueue(){
   if(flushing || sendQueue.length===0) return;
   flushing=true;
+  clearTimeout(retryTimer);
   const payload=sendQueue[0];
-  fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify(payload)})
+  const ctrl=new AbortController();
+  const timeoutId=setTimeout(()=>ctrl.abort(),25000);   // 25 秒沒回應視為逾時，走重試
+  fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify(payload),signal:ctrl.signal})
     .then(async r=>{ const txt=await r.text();
       try{ return JSON.parse(txt); }
       catch(e){ throw new Error("回應非 JSON（權限或未部署）"); } })
-    .then(res=>{ sendQueue.shift(); flushing=false; updatePending();
-      if(!res.success) toast("✗ "+payload.name+"："+(res.error||"寫入失敗"),"err");
-      processQueue(); })
-    .catch(e=>{ sendQueue.shift(); flushing=false; updatePending();
-      toast("✗ "+payload.name+" 寫入失敗："+e.message,"err"); processQueue(); });
+    .then(res=>{
+      clearTimeout(timeoutId);
+      sendQueue.shift(); retryCount=0;
+      if(!res.success){                                  // 後端明確拒絕：重試也不會好 → 進失敗清單
+        failedList.push({label:payload.label,err:res.error||"寫入失敗"});
+        toast("✗ "+payload.name+"："+(res.error||"寫入失敗"),"err");
+      }
+      saveQ(); flushing=false; updatePending(); processQueue();
+    })
+    .catch(e=>{                                          // 網路/逾時：保留在佇列，退避後重試
+      clearTimeout(timeoutId);
+      flushing=false; retryCount++;
+      updatePending(true);
+      const delay=Math.min(30000, 1500*Math.pow(2,Math.min(retryCount,5)));
+      retryTimer=setTimeout(processQueue,delay);
+    });
 }
-function updatePending(){ $("pending").textContent = sendQueue.length ? "● 待傳 "+sendQueue.length : ""; }
+function updatePending(retrying){
+  const el=$("pending"); let parts=[];
+  if(sendQueue.length) parts.push((retrying?"⟳ 重試中 ":"● 待傳 ")+sendQueue.length);
+  if(failedList.length) parts.push('<span class="fail" onclick="showFailed()">✗ 失敗 '+failedList.length+'</span>');
+  el.innerHTML=parts.join("　");
+}
+function showFailed(){
+  const msg=failedList.map((f,i)=>(i+1)+". "+f.label+"\n　→ "+f.err).join("\n");
+  if(confirm("以下項目寫入失敗（需手動補登到日盤表）：\n\n"+msg+"\n\n按「確定」清除此清單，「取消」保留。")){
+    failedList=[]; saveQ(); updatePending();
+  }
+}
 
 let tTimer=null;
 function toast(msg,type){ const t=$("toast"); t.textContent=msg; t.className="toast "+type+" show";
@@ -805,6 +510,8 @@ function toast(msg,type){ const t=$("toast"); t.textContent=msg; t.className="to
 
 renderPad();
 $("skuInput").addEventListener("keydown",e=>{ if(e.key==="Enter") confirmSku(); });
+updatePending();
+processQueue();   // 開頁時若上次還有沒傳完的，先續傳
 startScan();
 </script>
 </body>

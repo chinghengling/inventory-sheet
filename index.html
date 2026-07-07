@@ -129,7 +129,7 @@
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw-B0NMCe5bdKrBEfAZGCIHNeLEWWXo1jlfloCjs7JQeg4mXvgkEQzr95r0dnm7wW0dxA/exec";
 // ===== 易開罐後端網址：部署 can_backend.gs 後，把網址貼到這裡（掃到 CA 品項會送這支）=====
-const CAN_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTdG-9bq2s-Ydm81XCU4YWgafXUOsG0wass7u277SpgmdFWOI55hWg2Rj7qttFjM5_oQ/exec";
+const CAN_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwPy1PY5s4j8BSCRNj3m0rRko4EVQDdqiKhJ7iIa-jFQSKdGxBZVUvRbUs9e_Px9ti0/exec";
 // =================================================================
 
 /* =====================================================================
@@ -263,8 +263,8 @@ CFG.items = {
 // ===== CFG-ITEMS-END =====
 
 // ---- 易開罐品項（手動維護，寫入另一個易開罐盤點表；放在自動生成區塊之後，不會被 update_config.py 覆蓋）----
-CFG.items["CA001"] = {"name":"黑／洛神","sec":"CA"};
-CFG.items["CA002"] = {"name":"綠／桂花","sec":"CA"};
+CFG.items["CA001"] = {"name":"黑 / 洛神","sec":"CA"};
+CFG.items["CA002"] = {"name":"綠 / 桂花","sec":"CA"};
 CFG.items["CA003"] = {"name":"藍／白桃","sec":"CA"};
 CFG.items["CA004"] = {"name":"粉／荔枝","sec":"CA"};
 
@@ -419,7 +419,13 @@ function buildSpecs(){
   specs.forEach(s=>{const b=document.createElement("button"); b.className="opt"; b.textContent=s;
     b.onclick=()=>selectSpec(s); row.appendChild(b);});
   $("specWrap").style.display="flex";
-  const def=(lastSpec[sec] && specs.includes(lastSpec[sec]))?lastSpec[sec]:specs[0];
+  let def;
+  if(sec==="CA"){
+    // 易開罐：一倉只有箱；其他位置預設「瓶」（不受上次選擇影響）
+    def=specs.includes("瓶")?"瓶":specs[0];
+  }else{
+    def=(lastSpec[sec] && specs.includes(lastSpec[sec]))?lastSpec[sec]:specs[0];
+  }
   selectSpec(def);
 }
 function selectSpec(s){

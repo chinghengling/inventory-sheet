@@ -226,31 +226,32 @@ CFG.items = {
   "YG007": {"name":"空桶","sec":"YG","countOnly":true},
   "BP001": {"name":"CO2大","sec":"BP","positions":["一倉"]},
   "BP002": {"name":"CO2小","sec":"BP","positions":["一倉"]},
-  "BP003": {"name":"空桶數量","sec":"BP","positions":["一倉"]},
+  "BP003": {"name":"空桶數量","sec":"BP","positions":["一倉"],"dualSpec":{"一倉":{"slots":["大","小"],"mult":1}}},
   "BP004": {"name":"彩虹糖","sec":"BP","positions":["假裝現場","小倉(一店)"]},
   "BP005": {"name":"飛機餅乾","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"]},
-  "BP006": {"name":"9*9衛生紙","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",36],["包",1]]},
-  "BP007": {"name":"擦手紙","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["箱",20],["包",1]]},
+  "BP006": {"name":"9*9衛生紙","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",36],["包",1]],"posSpec":{"小倉(一店)":[["包",1]]},"dualSpec":{"一倉":{"slots":["假清","烘焙"],"mult":36}}},
+  "BP007": {"name":"擦手紙","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["箱",20],["包",1]],"posSpec":{"小倉(一店)":[["箱",20]]}},
   "BP008": {"name":"粉紅垃圾袋","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","小倉(二店)"]},
   "BP009": {"name":"大垃圾袋","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","小倉(二店)"]},
   "BP010": {"name":"咖啡抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
   "BP011": {"name":"白抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"],"spec":[["包",12],["條",1]]},
   "BP012": {"name":"口布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
-  "BP013": {"name":"PLA大","sec":"BP","positions":["酉鬼","一倉"],"spec":[["箱",500],["條",25],["杯",1]]},
-  "BP014": {"name":"PLA小","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",500],["條",25],["杯",1]]},
+  "BP013": {"name":"PLA大","sec":"BP","positions":["酉鬼","一倉"],"spec":[["箱",500],["條",25],["杯",1]],"posSpec":{"一倉":[["箱",500]]}},
+  "BP014": {"name":"PLA小","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",500],["條",25],["杯",1]],"posSpec":{"小倉(一店)":[["條",25]],"一倉":[["箱",500]]}},
   "BP015": {"name":"威杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",6],["個",1]]},
   "BP016": {"name":"Highball杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",6],["個",1]]},
   "BP017": {"name":"Shot杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",12],["個",1]]},
   "BP018": {"name":"蠟燭杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"]},
   "BP019": {"name":"蠟燭","sec":"BP","positions":["小倉(二店)"]},
-  "BP020": {"name":"大紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"]},
-  "BP021": {"name":"國泰紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",5],["個",1]]},
+  "BP020": {"name":"大紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"posSpec":{"小倉(一店)":[["箱",75],["個",1]]}},
+  "BP021": {"name":"國泰紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",5],["個",1]],"posSpec":{"小倉(一店)":[["箱",100],["條",5],["個",1]]}},
   "BP022": {"name":"聯合紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",3],["個",1]]}
 };
 // ===== CFG-ITEMS-END =====
 
 const F = CFG.formulas;
 let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
+let dualCfg=null, dualSlot=null;   // 雙格式（大/小、假清/烘焙）：dualCfg=設定, dualSlot=目前選哪一側
 let scanner=null;
 const lastPos = JSON.parse(localStorage.getItem("lastPos")||"{}");
 const lastSpec = JSON.parse(localStorage.getItem("lastSpec")||"{}");
@@ -370,8 +371,18 @@ function selectPos(p){
 
 function buildSpecs(){
   const S=CFG.sections[sec]; let specs=[];
-  if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","橡膠","整桶"]; }
-  else if(sec==="BP"){ if(cur.spec) specs=cur.spec.map(s=>s[0]); }
+  dualCfg=null; dualSlot=null;
+  // 雙格式（大/小、假清/烘焙）：在特定位置把規格選單當成「兩側切換」用
+  if(sec==="BP" && cur.dualSpec && cur.dualSpec[pos]){
+    dualCfg=cur.dualSpec[pos];
+    specs=dualCfg.slots.slice();
+  }
+  else if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","橡膠","整桶"]; }
+  else if(sec==="BP"){
+    // 位置限定規格：該品項在此位置若有 posSpec 就用它，否則用預設 spec
+    const useSpec=(cur.posSpec && cur.posSpec[pos]) ? cur.posSpec[pos] : cur.spec;
+    if(useSpec) specs=useSpec.map(s=>s[0]);
+  }
   const row=$("specRow");
   if(specs.length===0){ $("specWrap").style.display="none"; spec=null; applyMode(); return; }
   row.innerHTML="";
@@ -390,9 +401,16 @@ function selectSpec(s){
 function applyMode(){
   const S=CFG.sections[sec];
   weigh=false; mult=1; writeCol=pos;
-  if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L"||spec==="橡膠")){ weigh=true; writeCol=pos; }
+  if(dualCfg){                                   // 雙格式：spec 當作「側別」，倍數由 dualCfg.mult 決定
+    dualSlot=spec;
+    mult=dualCfg.mult||1;
+  }
+  else if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L"||spec==="橡膠")){ weigh=true; writeCol=pos; }
   else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; }
-  else if(sec==="BP" && cur.spec){ const f=cur.spec.find(x=>x[0]===spec); mult=f?f[1]:1; }
+  else if(sec==="BP"){
+    const useSpec=(cur.posSpec && cur.posSpec[pos]) ? cur.posSpec[pos] : cur.spec;
+    if(useSpec){ const f=useSpec.find(x=>x[0]===spec); mult=f?f[1]:1; }
+  }
   updateHint();
   const beerWeigh=(sec==="YG" && weigh);
   document.querySelectorAll(".key.plus,.key.minus").forEach(b=>b.disabled=beerWeigh);
@@ -404,7 +422,12 @@ function updateHint(){
     if(sec==="YG") v=(w-F.beer.empty)/F.beer.cap;
     else{const k=F[spec]; v=(w-k.empty)/k.cap;}
     h.textContent="換算："+v.toFixed(3)+" 桶";
-  } else if(sec==="BP" && cur && cur.spec && mult>1){
+  } else if(dualCfg){
+    const other=dualCfg.slots.find(s=>s!==dualSlot);
+    let msg="填「"+dualSlot+"」欄（另一側「"+other+"」不動）";
+    if(mult>1 && !isNaN(w)) msg="1 箱 = "+mult+" 個｜填「"+dualSlot+"」";
+    h.textContent=msg;
+  } else if(sec==="BP" && cur && mult>1){
     h.textContent="1 "+spec+" = "+mult+" 個";
   } else h.textContent="";
 }
@@ -460,6 +483,11 @@ function submit(op,value){
   const payload={uid:newUid(),sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
     header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab(),
     label:cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown};
+  if(dualCfg){                                   // 雙格式：告訴後端要填哪一側、共有哪兩側
+    payload.dual=dualSlot;
+    payload.dualSlots=dualCfg.slots;
+    payload.op="add";                            // 雙格式一律累加（缺的一側補 n）
+  }
   sendQueue.push(payload); saveQ(); updatePending(); processQueue();
   toast("✓ "+payload.label,"ok");  // 立刻回饋；若之後傳送失敗會自動重試並在右下角顯示
   setDisp("");

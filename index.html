@@ -127,7 +127,7 @@
 
 <script>
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw-B0NMCe5bdKrBEfAZGCIHNeLEWWXo1jlfloCjs7JQeg4mXvgkEQzr95r0dnm7wW0dxA/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzgw2AkYQVMekLlNDyRbo3ts5jNjbiSb2V8ajpeG1FisyfHwVyG9QPPLPB8487OXR0qEQ/exec";
 // =================================================================
 
 /* =====================================================================
@@ -190,6 +190,7 @@ const CFG = {
  "formulas": {
   "10L": { "empty": 2.45, "cap": 10 },
   "15L": { "empty": 3, "cap": 10 },
+  "橡膠": { "empty": 3.35, "cap": 10 },
   "beer": { "empty": 6, "cap": 20 }
  }
 };
@@ -235,13 +236,13 @@ CFG.items = {
   "BP010": {"name":"咖啡抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
   "BP011": {"name":"白抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"],"spec":[["包",12],["條",1]]},
   "BP012": {"name":"口布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
-  "BP013": {"name":"PLA大","sec":"BP","positions":["酉鬼","一倉"],"spec":[["箱",500],["條",25],["杯",1]]},
-  "BP014": {"name":"PLA小","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",500],["條",25],["杯",1]]},
+  "BP013": {"name":"PLA大","sec":"BP","positions":["酉鬼","一倉"],"spec":[["箱",500],["杯",1]]},
+  "BP014": {"name":"PLA小","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",500],["杯",1]]},
   "BP015": {"name":"威杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",6],["個",1]]},
   "BP016": {"name":"Highball杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",6],["個",1]]},
   "BP017": {"name":"Shot杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"],"spec":[["盒",12],["個",1]]},
   "BP018": {"name":"蠟燭杯","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)"]},
-  "BP019": {"name":"蠟燭","sec":"BP","positions":["小倉(二店)"]},
+  "BP019": {"name":"蠟燭","sec":"BP","positions":["小倉(二店)"],"spec":[["盒",100],["入",1]]},
   "BP020": {"name":"大紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"]},
   "BP021": {"name":"國泰紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",5],["個",1]]},
   "BP022": {"name":"聯合紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",3],["個",1]]}
@@ -369,7 +370,7 @@ function selectPos(p){
 
 function buildSpecs(){
   const S=CFG.sections[sec]; let specs=[];
-  if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","整桶"]; }
+  if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","橡膠","整桶"]; }
   else if(sec==="BP"){ if(cur.spec) specs=cur.spec.map(s=>s[0]); }
   const row=$("specRow");
   if(specs.length===0){ $("specWrap").style.display="none"; spec=null; applyMode(); return; }
@@ -389,7 +390,7 @@ function selectSpec(s){
 function applyMode(){
   const S=CFG.sections[sec];
   weigh=false; mult=1; writeCol=pos;
-  if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L")){ weigh=true; writeCol=pos; }
+  if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L"||spec==="橡膠")){ weigh=true; writeCol=pos; }
   else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; }
   else if(sec==="BP" && cur.spec){ const f=cur.spec.find(x=>x[0]===spec); mult=f?f[1]:1; }
   updateHint();
@@ -401,7 +402,7 @@ function updateHint(){
   if(weigh && !isNaN(w)){
     let v;
     if(sec==="YG") v=(w-F.beer.empty)/F.beer.cap;
-    else{const k=spec==="10L"?F["10L"]:F["15L"]; v=(w-k.empty)/k.cap;}
+    else{const k=F[spec]; v=(w-k.empty)/k.cap;}
     h.textContent="換算："+v.toFixed(3)+" 桶";
   } else if(sec==="BP" && cur && cur.spec && mult>1){
     h.textContent="1 "+spec+" = "+mult+" 個";
@@ -430,7 +431,7 @@ function press(k){
     if(isNaN(n)){ toast("請先輸入數字","err"); return; }
     if(weigh){
       if(sec==="YG"){ submit("set",n); return; }
-      const kk=spec==="10L"?F["10L"]:F["15L"]; submit("set",(n-kk.empty)/kk.cap);
+      const kk=F[spec]; submit("set",(n-kk.empty)/kk.cap);
     } else submit("add",n*mult);
   }
 }

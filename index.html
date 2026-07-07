@@ -128,6 +128,8 @@
 <script>
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw-B0NMCe5bdKrBEfAZGCIHNeLEWWXo1jlfloCjs7JQeg4mXvgkEQzr95r0dnm7wW0dxA/exec";
+// ===== 易開罐後端網址：部署 can_backend.gs 後，把網址貼到這裡（掃到 CA 品項會送這支）=====
+const CAN_SCRIPT_URL = "請貼上易開罐後端的部署網址";
 // =================================================================
 
 /* =====================================================================
@@ -148,7 +150,9 @@ const SUFFIX_POS = {
           "LF":"T區冰箱左", "RF":"T區冰箱右", "1F":"一倉冰箱" },
   "YG": { "YI":"冰箱插管", "YO":"冰箱未插", "1N":"倉庫", "YN":"酉鬼內未冰" },
   "BP": { "YG":"酉鬼", "JZ":"假裝現場", "HB":"烘焙現場",
-          "SA":"小倉(一店)", "SB":"小倉(二店)", "1N":"一倉" }
+          "SA":"小倉(一店)", "SB":"小倉(二店)", "1N":"一倉" },
+  "CA": { "PF":"二店 Pos 冰箱", "LF":"T區左冰箱", "HB":"二店酒櫃常溫",
+          "1N":"一倉", "YG":"酉鬼", "JT":"卸貨區橘桶" }
 };
 
 // ---- B. 區段設定（幾乎不需要改） ----
@@ -184,6 +188,15 @@ const CFG = {
    "kind": "consumable",
    "header": "品名（Key個數）",
    "sig": "備品"
+  },
+  "CA": {
+   "block": "易開罐",
+   "kind": "can",
+   "target": "can",
+   "positions": ["二店 Pos 冰箱","T區左冰箱","二店酒櫃常溫","一倉","酉鬼","卸貨區橘桶","儲冰槽"],
+   "defaultPos": "儲冰槽",
+   "boxOnly": ["一倉"],
+   "canSpec": [["箱",24],["瓶",1]]
   }
  },
  "items": {},
@@ -248,6 +261,12 @@ CFG.items = {
   "BP022": {"name":"聯合紙捲","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)"],"spec":[["條",3],["個",1]]}
 };
 // ===== CFG-ITEMS-END =====
+
+// ---- 易開罐品項（手動維護，寫入另一個易開罐盤點表；放在自動生成區塊之後，不會被 update_config.py 覆蓋）----
+CFG.items["CA001"] = {"name":"黑／洛神","sec":"CA"};
+CFG.items["CA002"] = {"name":"綠／桂花","sec":"CA"};
+CFG.items["CA003"] = {"name":"藍／白桃","sec":"CA"};
+CFG.items["CA004"] = {"name":"粉／荔枝","sec":"CA"};
 
 const F = CFG.formulas;
 let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
@@ -338,6 +357,10 @@ function applyCode(code,manual){
     }else{
       toast("後綴「"+suf+"」沒有對應位置，請手動選擇","err");
     }
+  }else if(item.sec==="CA"){
+    // 易開罐無後綴：強制預設儲冰槽（不受上次選擇影響）
+    const dp=CFG.sections.CA.defaultPos;
+    if(pos!==dp) selectPos(dp);
   }
   return true;
 }
@@ -360,7 +383,10 @@ function loadItem(sku,item){
     row.appendChild(b);
   });
   $("posWrap").style.display="flex";
-  const def=(lastPos[sec] && positions.includes(lastPos[sec]))?lastPos[sec]:positions[0];
+  const secDef=CFG.sections[sec].defaultPos;   // 區段預設位置（CA=儲冰槽）
+  const def=(lastPos[sec] && positions.includes(lastPos[sec])) ? lastPos[sec]
+            : (secDef && positions.includes(secDef)) ? secDef
+            : positions[0];
   selectPos(def); setDisp("");
 }
 function selectPos(p){
@@ -376,6 +402,10 @@ function buildSpecs(){
   if(sec==="BP" && cur.dualSpec && cur.dualSpec[pos]){
     dualCfg=cur.dualSpec[pos];
     specs=dualCfg.slots.slice();
+  }
+  else if(sec==="CA"){
+    // 易開罐：一律箱/瓶換算；boxOnly 位置（一倉）只顯示箱
+    specs=(S.boxOnly && S.boxOnly.includes(pos)) ? ["箱"] : S.canSpec.map(s=>s[0]);
   }
   else if(sec==="JZ"||sec==="HB"){ if(pos===S.tap) specs=["10L","15L","橡膠","整桶"]; }
   else if(sec==="BP"){
@@ -407,6 +437,7 @@ function applyMode(){
   }
   else if((sec==="JZ"||sec==="HB") && pos===S.tap && (spec==="10L"||spec==="15L"||spec==="橡膠")){ weigh=true; writeCol=pos; }
   else if(sec==="YG" && pos===S.tap && !cur.countOnly){ weigh=true; writeCol=S.weighCol; }
+  else if(sec==="CA"){ const f=S.canSpec.find(x=>x[0]===spec); mult=f?f[1]:1; writeCol=pos; }
   else if(sec==="BP"){
     const useSpec=(cur.posSpec && cur.posSpec[pos]) ? cur.posSpec[pos] : cur.spec;
     if(useSpec){ const f=useSpec.find(x=>x[0]===spec); mult=f?f[1]:1; }
@@ -427,6 +458,8 @@ function updateHint(){
     let msg="填「"+dualSlot+"」欄（另一側「"+other+"」不動）";
     if(mult>1 && !isNaN(w)) msg="1 箱 = "+mult+" 個｜填「"+dualSlot+"」";
     h.textContent=msg;
+  } else if(sec==="CA" && spec==="箱"){
+    h.textContent="1 箱 = 24 瓶";
   } else if(sec==="BP" && cur && mult>1){
     h.textContent="1 "+spec+" = "+mult+" 個";
   } else h.textContent="";
@@ -482,6 +515,7 @@ function submit(op,value){
   const shown=op==="set"?Number(value).toFixed(3):(value>0?"+":"")+value;
   const payload={uid:newUid(),sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
     header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab(),
+    target:CFG.sections[sec].target||"day",   // 送哪支後端：CA→can（易開罐），其餘→day（日盤表）
     label:cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown};
   if(dualCfg){                                   // 雙格式：告訴後端要填哪一側、共有哪兩側
     payload.dual=dualSlot;
@@ -497,9 +531,10 @@ function processQueue(){
   flushing=true;
   clearTimeout(retryTimer);
   const payload=sendQueue[0];
+  const url=(payload.target==="can")?CAN_SCRIPT_URL:SCRIPT_URL;   // CA 送易開罐後端，其餘送日盤表後端
   const ctrl=new AbortController();
   const timeoutId=setTimeout(()=>ctrl.abort(),25000);   // 25 秒沒回應視為逾時，走重試
-  fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify(payload),signal:ctrl.signal})
+  fetch(url,{method:"POST",body:JSON.stringify(payload),signal:ctrl.signal})
     .then(async r=>{ const txt=await r.text();
       try{ return JSON.parse(txt); }
       catch(e){ throw new Error("回應非 JSON（權限或未部署）"); } })

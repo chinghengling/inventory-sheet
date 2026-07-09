@@ -26,8 +26,23 @@
   .name .empty{font-size:clamp(13px,2.4vh,16px); color:var(--dim); font-weight:600;}
 
   /* ② 相機（正方形，固定在上方） 27% */
-  #reader{height:27dvh; width:27dvh; max-width:100%; margin:0 auto; background:#000; overflow:hidden; position:relative;}
+  .camwrap{height:27dvh; display:flex; align-items:stretch; justify-content:center; gap:6px; padding:0 6px;}
+  #reader{height:27dvh; width:27dvh; flex:0 0 auto; background:#000; overflow:hidden; position:relative;}
   #reader video{width:100%; height:100%; object-fit:cover;}
+  .reminder{flex:1 1 0; min-width:0; align-self:center; max-height:100%; overflow:hidden;
+    display:none; flex-direction:column; justify-content:center; gap:4px;
+    padding:8px 10px; border-radius:12px; border:1px solid var(--line);
+    background:linear-gradient(180deg,#1B2430,#151B24);}
+  .reminder.show{display:flex;}
+  .reminder.done{border-color:var(--accent); background:linear-gradient(180deg,#11241B,#0E1B15);}
+  .reminder .rtitle{font-size:clamp(11px,1.9vh,13px); color:var(--dim); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .reminder .rbig{font-size:clamp(20px,4.2vh,30px); font-weight:800; line-height:1.05; color:var(--warn);}
+  .reminder.done .rbig{color:var(--accent);}
+  .reminder .rbig small{font-size:clamp(11px,1.9vh,13px); font-weight:600; color:var(--dim);}
+  .reminder .rlist{display:flex; flex-direction:column; gap:2px; margin-top:2px;}
+  .reminder .rlist span{font-size:clamp(11px,2vh,14px); font-weight:600; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .reminder .rdone{font-size:clamp(13px,2.4vh,16px); font-weight:800; color:var(--accent);}
   .scanning{position:absolute; left:9px; top:6px; z-index:6; font-size:11px; color:#9be8c8;
     background:rgba(13,17,23,.6); padding:2px 9px; border-radius:999px;}
   .torch{position:absolute; right:9px; top:6px; z-index:7; width:36px; height:36px; border-radius:999px;
@@ -92,9 +107,12 @@
     <button class="manualbtn" onclick="manualSku()">⌨ SKU</button>
   </div>
 
-  <div id="reader">
-    <span class="scanning">● 掃描中 v3</span>
-    <button class="torch" id="torchBtn" onclick="toggleTorch()">燈</button>
+  <div class="camwrap">
+    <div id="reader">
+      <span class="scanning">● 掃描中 v3</span>
+      <button class="torch" id="torchBtn" onclick="toggleTorch()">燈</button>
+    </div>
+    <div class="reminder" id="reminder"></div>
   </div>
 
   <div class="optszone">
@@ -129,7 +147,7 @@
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw-B0NMCe5bdKrBEfAZGCIHNeLEWWXo1jlfloCjs7JQeg4mXvgkEQzr95r0dnm7wW0dxA/exec";
 // ===== 易開罐後端網址：部署 can_backend.gs 後，把網址貼到這裡（掃到 CA 品項會送這支）=====
-const CAN_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwPy1PY5s4j8BSCRNj3m0rRko4EVQDdqiKhJ7iIa-jFQSKdGxBZVUvRbUs9e_Px9ti0/exec";
+const CAN_SCRIPT_URL = "請貼上易開罐後端的部署網址";
 // =================================================================
 
 /* =====================================================================
@@ -280,6 +298,97 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
   const m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
   return m+day;}
 
+/* ==================== 位置盤點提示（reminder） ====================
+ * 需求：一個位置一個位置盤，掃到某位置的品項時，提示這位置還剩幾項沒盤。
+ *  - 應盤清單：跨區段，凡 positions 含此位置名的品項都算（啟動時自動建反查表）
+ *  - 已盤：對「該位置+該品項」送出過任一筆就算（重複送只算一次）
+ *  - ≤3 項列品名，>3 只顯示數字
+ *  - 出現後 10 分鐘該位置仍沒盤完 → 卡片消失、計時歸零；再掃到該位置又重新出現計時
+ *  - 已盤記錄跟著營業日，換日自動清空
+ * =============================================================== */
+const REMIND_TIMEOUT = 10*60*1000;   // 10 分鐘
+
+// 反查表：位置名 → 該位置所有應盤品項的 sku（跨區段），啟動時建一次
+const POS_ITEMS = (function(){
+  const map={};
+  for(const sku in CFG.items){
+    const it=CFG.items[sku];
+    const positions = it.positions || (CFG.sections[it.sec] && CFG.sections[it.sec].positions) || [];
+    positions.forEach(p=>{ (map[p]=map[p]||[]).push(sku); });
+  }
+  return map;
+})();
+
+// 已盤記錄：{ "位置名::sku": true }，跟著營業日；換日自動重置
+let doneDay = todayTab();
+let doneSet = {};
+try{
+  const saved=JSON.parse(localStorage.getItem("doneSet")||"{}");
+  if(saved.day===todayTab()){ doneSet=saved.map||{}; }
+}catch(e){}
+function saveDone(){ localStorage.setItem("doneSet",JSON.stringify({day:doneDay,map:doneSet})); }
+function checkDayRollover(){
+  const t=todayTab();
+  if(t!==doneDay){ doneDay=t; doneSet={}; saveDone(); remindTimers={}; }
+}
+function markDone(posName,sku){
+  checkDayRollover();
+  doneSet[posName+"::"+sku]=true; saveDone();
+}
+function remainingFor(posName){
+  const all=POS_ITEMS[posName]||[];
+  const rem=all.filter(sku=>!doneSet[posName+"::"+sku]);
+  return {total:all.length, remain:rem};
+}
+
+// 每個位置的 10 分鐘計時起點；muted=逾時靜默中（需再次掃到該位置才復活）
+let remindTimers={}, remindMuted={};
+let remindTick=null;
+
+function updateReminder(fromAction){
+  checkDayRollover();
+  const el=$("reminder");
+  if(!pos || !POS_ITEMS[pos] || POS_ITEMS[pos].length===0){ hideReminder(); return; }
+
+  // 實際盤點動作（掃到/選位置/送出）會解除此位置的靜默並重新計時
+  if(fromAction && remindMuted[pos]){ remindMuted[pos]=false; remindTimers[pos]=Date.now(); }
+
+  // 靜默中且非由動作觸發（例如背景 tick）→ 不顯示
+  if(remindMuted[pos]){ if(pos) hideReminder(); return; }
+
+  // 10 分鐘逾時：這位置首次出現提示後超過 10 分鐘仍沒盤完 → 消失、進入靜默
+  const now=Date.now();
+  if(remindTimers[pos]!=null && (now-remindTimers[pos])>REMIND_TIMEOUT){
+    remindMuted[pos]=true; delete remindTimers[pos];
+    hideReminder();
+    return;
+  }
+
+  const {total,remain}=remainingFor(pos);
+  if(remain.length===0){
+    // 全盤完：顯示打勾，短暫後隱藏；清掉此位置計時
+    delete remindTimers[pos]; remindMuted[pos]=false;
+    el.className="reminder show done";
+    el.innerHTML='<div class="rtitle">'+esc(pos)+'</div><div class="rdone">✓ 此位置已盤完</div>';
+    clearTimeout(el._hideT); el._hideT=setTimeout(hideReminder,4000);
+    return;
+  }
+
+  // 尚有未盤 → 確保此位置有計時起點
+  if(remindTimers[pos]==null) remindTimers[pos]=now;
+
+  let html='<div class="rtitle">'+esc(pos)+'</div>';
+  html+='<div class="rbig">'+remain.length+' <small>項未盤 / 共'+total+'</small></div>';
+  if(remain.length<=3){
+    html+='<div class="rlist">'+remain.map(sku=>'<span>· '+esc(CFG.items[sku].name)+'</span>').join('')+'</div>';
+  }
+  el.className="reminder show";
+  el.innerHTML=html;
+  clearTimeout(el._hideT);
+}
+function hideReminder(){ const el=$("reminder"); el.className="reminder"; el.innerHTML=""; }
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
 // ---------- 相機：超廣角優先(iPhone) + 正方形讀取 + 持續掃描 ----------
 function startScan(){
   const c={ verbose:false, experimentalFeatures:{ useBarCodeDetectorIfSupported:true } };
@@ -393,6 +502,7 @@ function selectPos(p){
   pos=p; lastPos[sec]=p; localStorage.setItem("lastPos",JSON.stringify(lastPos));
   [...$("posRow").children].forEach(b=>b.classList.toggle("on",b.textContent===p));
   buildSpecs();
+  updateReminder(true);   // 切換位置立即更新提示（跟著新位置的剩餘，能解除靜默）
 }
 
 function buildSpecs(){
@@ -531,6 +641,8 @@ function submit(op,value){
   sendQueue.push(payload); saveQ(); updatePending(); processQueue();
   toast("✓ "+payload.label,"ok");  // 立刻回饋；若之後傳送失敗會自動重試並在右下角顯示
   setDisp("");
+  markDone(pos,cur.sku);   // 標記「此位置+此品項」已盤（重複送只算一次）
+  updateReminder(true);    // 送出後重算此位置剩餘，實時更新提示
 }
 function processQueue(){
   if(flushing || sendQueue.length===0) return;
@@ -582,6 +694,8 @@ renderPad();
 $("skuInput").addEventListener("keydown",e=>{ if(e.key==="Enter") confirmSku(); });
 updatePending();
 processQueue();   // 開頁時若上次還有沒傳完的，先續傳
+// 每 20 秒檢查一次：讓 reminder 的 10 分鐘逾時即使使用者沒動作也能自動消失
+remindTick=setInterval(()=>{ if($("reminder").classList.contains("show")) updateReminder(); },20000);
 startScan();
 </script>
 </body>

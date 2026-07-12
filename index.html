@@ -568,7 +568,7 @@ function updateHint(){
     let v;
     if(sec==="YG") v=(w-F.beer.empty)/F.beer.cap;
     else{const k=F[spec]; v=(w-k.empty)/k.cap;}
-    h.textContent="換算："+v.toFixed(3)+" 桶";
+    h.textContent="換算："+v.toFixed(2)+" 桶";
   } else if(dualCfg){
     const other=dualCfg.slots.find(s=>s!==dualSlot);
     let msg="填「"+dualSlot+"」欄（另一側「"+other+"」不動）";
@@ -603,7 +603,7 @@ function press(k){
     if(isNaN(n)){ toast("請先輸入數字","err"); return; }
     if(weigh){
       if(sec==="YG"){ submit("set",n); return; }
-      const kk=F[spec]; submit("set",(n-kk.empty)/kk.cap);
+      const kk=F[spec]; submit("set",Math.round(((n-kk.empty)/kk.cap)*100)/100);
     } else submit("add",n*mult);
   }
 }
@@ -628,7 +628,7 @@ function newUid(){ return Date.now().toString(36)+"-"+Math.random().toString(36)
 
 function submit(op,value){
   if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
-  const shown=op==="set"?Number(value).toFixed(3):(value>0?"+":"")+value;
+  const shown=op==="set"?Number(value).toFixed(2):(value>0?"+":"")+value;
   const payload={uid:newUid(),sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
     header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab(),
     target:CFG.sections[sec].target||"day",   // 送哪支後端：CA→can（易開罐），其餘→day（日盤表）

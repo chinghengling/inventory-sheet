@@ -90,6 +90,15 @@
   .toast.ok{background:var(--accent); color:var(--accent-ink);}
   .toast.err{background:var(--bad); color:#1A0808;}
   .pending{position:fixed; right:10px; bottom:5px; z-index:40; font-size:11px; font-weight:600; color:var(--warn);}
+  /* 成功後顯示盤點表現值：畫面中央浮 1 秒、不打斷操作、後蓋前 */
+  .curpop{position:fixed; left:50%; top:38%; transform:translate(-50%,-50%) scale(.9);
+    z-index:45; padding:14px 22px; border-radius:16px; pointer-events:none;
+    background:rgba(13,17,23,.92); border:1px solid var(--accent); color:var(--ink);
+    box-shadow:0 10px 30px rgba(0,0,0,.5); text-align:center; opacity:0; transition:opacity .12s, transform .12s;}
+  .curpop.show{opacity:1; transform:translate(-50%,-50%) scale(1);}
+  .curpop .cpname{font-size:13px; color:var(--dim); margin-bottom:2px; max-width:60vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .curpop .cpval{font-size:30px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; line-height:1.1;}
+  .curpop .cpunit{font-size:13px; color:var(--dim); margin-top:2px;}
   .pending .fail{color:var(--bad); text-decoration:underline; pointer-events:auto;}
   .skumodal{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60; display:none; align-items:center; justify-content:center; padding:24px;}
   .skubox{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; width:100%; max-width:340px; display:flex; flex-direction:column; gap:12px;}
@@ -131,6 +140,7 @@
   <div class="blank"></div>
   <div class="toast" id="toast"></div>
   <div class="pending" id="pending"></div>
+  <div class="curpop" id="curpop"></div>
 
   <div class="skumodal" id="skuModal">
     <div class="skubox">
@@ -306,80 +316,142 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
  *  - 出現後 10 分鐘該位置仍沒盤完 → 卡片消失、計時歸零；再掃到該位置又重新出現計時
  *  - 已盤記錄跟著營業日，換日自動清空
  * =============================================================== */
-const REMIND_TIMEOUT = 10*60*1000;   // 10 分鐘
+const REMIND_RESET = 60*60*1000;   // 1 小時：到時把該位置的已盤記錄清空，reminder 從頭重算
+const LIST_THRESHOLD = 5;          // 未盤 ≤5 項時列出品名
 
-// 反查表：位置名 → 該位置所有應盤品項的 sku（跨區段），啟動時建一次
+// 不納入 reminder 的品項（活動調酒，所有位置都排除）
+const REMIND_EXCLUDE = {"JZ010":1,"HB010":1};
+// 不納入「品項 reminder」的區段（CA 走另一套「位置 reminder」）
+function inItemReminder(sku){
+  if(REMIND_EXCLUDE[sku]) return false;
+  const it=CFG.items[sku];
+  if(!it || it.sec==="CA") return false;   // CA 不走品項 reminder
+  return true;
+}
+
+// 只有這兩個位置要拆 JZ / HB（因 JZ、HB 的插管/未插同名，需分開計算）；
+// 其他位置維持用「位置名」聚合（跨區段）。
+const SPLIT_POS = {"吧檯插管":1, "吧檯未插":1};
+// 產生 reminder 分組的 key：需拆分的位置用「區段::位置」，其餘用「位置名」
+function remindKey(secName,posName){
+  return SPLIT_POS[posName] ? (secName+"::"+posName) : posName;
+}
+
+// 反查表：reminder key → 該分組所有「應盤品項」的 sku（已排除活動調酒與 CA）
 const POS_ITEMS = (function(){
   const map={};
   for(const sku in CFG.items){
+    if(!inItemReminder(sku)) continue;
     const it=CFG.items[sku];
     const positions = it.positions || (CFG.sections[it.sec] && CFG.sections[it.sec].positions) || [];
-    positions.forEach(p=>{ (map[p]=map[p]||[]).push(sku); });
+    positions.forEach(p=>{ const k=remindKey(it.sec,p); (map[k]=map[k]||[]).push(sku); });
   }
   return map;
 })();
 
-// 已盤記錄：{ "位置名::sku": true }，跟著營業日；換日自動重置
+// CA 位置 reminder：掃到 CA 時，顯示還有哪些「位置」沒盤（跨品項，某位置輸入過任一 CA 品項就算該位置完成）
+const CA_POSITIONS = (CFG.sections.CA && CFG.sections.CA.positions) ? CFG.sections.CA.positions.slice() : [];
+
+// 已盤記錄：{ "位置名::sku": true }（品項 reminder）與 { "CA位置名": true }（CA 位置 reminder）
+// 都跟著營業日；換日自動重置
 let doneDay = todayTab();
-let doneSet = {};
+let doneSet = {};        // 品項 reminder 用
+let caDoneSet = {};      // CA 位置 reminder 用
 try{
   const saved=JSON.parse(localStorage.getItem("doneSet")||"{}");
-  if(saved.day===todayTab()){ doneSet=saved.map||{}; }
+  if(saved.day===todayTab()){ doneSet=saved.map||{}; caDoneSet=saved.ca||{}; }
 }catch(e){}
-function saveDone(){ localStorage.setItem("doneSet",JSON.stringify({day:doneDay,map:doneSet})); }
+function saveDone(){ localStorage.setItem("doneSet",JSON.stringify({day:doneDay,map:doneSet,ca:caDoneSet})); }
 function checkDayRollover(){
   const t=todayTab();
-  if(t!==doneDay){ doneDay=t; doneSet={}; saveDone(); remindTimers={}; }
+  if(t!==doneDay){ doneDay=t; doneSet={}; caDoneSet={}; saveDone(); remindTimers={}; }
 }
 function markDone(posName,sku){
   checkDayRollover();
-  doneSet[posName+"::"+sku]=true; saveDone();
+  const it=CFG.items[sku];
+  if(it && it.sec==="CA"){
+    caDoneSet[posName]=true;     // CA：記錄「此位置已盤」（跨品項）
+  }else if(inItemReminder(sku)){
+    const k=remindKey(it.sec,posName);
+    doneSet[k+"::"+sku]=true;
+  }
+  saveDone();
 }
-function remainingFor(posName){
-  const all=POS_ITEMS[posName]||[];
-  const rem=all.filter(sku=>!doneSet[posName+"::"+sku]);
-  return {total:all.length, remain:rem};
+function remainingFor(secName,posName){
+  const k=remindKey(secName,posName);
+  const all=POS_ITEMS[k]||[];
+  const rem=all.filter(sku=>!doneSet[k+"::"+sku]);
+  return {key:k, total:all.length, remain:rem};
+}
+function caRemaining(){
+  const rem=CA_POSITIONS.filter(p=>!caDoneSet[p]);
+  return {total:CA_POSITIONS.length, remain:rem};
 }
 
-// 每個位置的 10 分鐘計時起點；muted=逾時靜默中（需再次掃到該位置才復活）
-let remindTimers={}, remindMuted={};
+// 每個位置的計時起點（1 小時重設用）
+let remindTimers={};
 let remindTick=null;
+
+// 1 小時重設檢查：某分組首次出現 reminder 後滿 1 小時 → 清空該分組已盤記錄、計時歸零 → 從頭算
+function checkPosReset(key){
+  const t=remindTimers[key];
+  if(t!=null && (Date.now()-t)>REMIND_RESET){
+    if(key==="__CA__"){
+      caDoneSet={};                                  // CA：清空所有位置已盤
+    }else{
+      const all=POS_ITEMS[key]||[];
+      all.forEach(sku=>{ delete doneSet[key+"::"+sku]; });   // 清空此分組所有品項已盤
+    }
+    saveDone();
+    delete remindTimers[key];                        // 計時歸零，下面會重新設起點
+    return true;
+  }
+  return false;
+}
 
 function updateReminder(fromAction){
   checkDayRollover();
   const el=$("reminder");
-  if(!pos || !POS_ITEMS[pos] || POS_ITEMS[pos].length===0){ hideReminder(); return; }
 
-  // 實際盤點動作（掃到/選位置/送出）會解除此位置的靜默並重新計時
-  if(fromAction && remindMuted[pos]){ remindMuted[pos]=false; remindTimers[pos]=Date.now(); }
-
-  // 靜默中且非由動作觸發（例如背景 tick）→ 不顯示
-  if(remindMuted[pos]){ if(pos) hideReminder(); return; }
-
-  // 10 分鐘逾時：這位置首次出現提示後超過 10 分鐘仍沒盤完 → 消失、進入靜默
-  const now=Date.now();
-  if(remindTimers[pos]!=null && (now-remindTimers[pos])>REMIND_TIMEOUT){
-    remindMuted[pos]=true; delete remindTimers[pos];
-    hideReminder();
+  // CA 走位置 reminder
+  if(cur && sec==="CA"){
+    checkPosReset("__CA__");
+    if(remindTimers["__CA__"]==null) remindTimers["__CA__"]=Date.now();
+    const {total,remain}=caRemaining();
+    if(remain.length===0){
+      el.className="reminder show done";
+      el.innerHTML='<div class="rtitle">易開罐 各位置</div><div class="rdone">✓ 全部位置已盤</div>';
+      clearTimeout(el._hideT); el._hideT=setTimeout(hideReminder,4000);
+      return;
+    }
+    let html='<div class="rtitle">易開罐 未盤位置</div>';
+    html+='<div class="rbig">'+remain.length+' <small>個位置 / 共'+total+'</small></div>';
+    // CA 位置少，一律全列（你的要求：所有剩餘位置始終顯示）
+    html+='<div class="rlist">'+remain.map(p=>'<span>· '+esc(p)+'</span>').join('')+'</div>';
+    el.className="reminder show";
+    el.innerHTML=html;
+    clearTimeout(el._hideT);
     return;
   }
 
-  const {total,remain}=remainingFor(pos);
+  // 其他區段走品項 reminder
+  if(!pos || !cur){ hideReminder(); return; }
+  const k=remindKey(sec,pos);
+  if(!POS_ITEMS[k] || POS_ITEMS[k].length===0){ hideReminder(); return; }
+  checkPosReset(k);
+  if(remindTimers[k]==null) remindTimers[k]=Date.now();
+
+  const {total,remain}=remainingFor(sec,pos);
   if(remain.length===0){
-    // 全盤完：顯示打勾，短暫後隱藏；清掉此位置計時
-    delete remindTimers[pos]; remindMuted[pos]=false;
     el.className="reminder show done";
     el.innerHTML='<div class="rtitle">'+esc(pos)+'</div><div class="rdone">✓ 此位置已盤完</div>';
     clearTimeout(el._hideT); el._hideT=setTimeout(hideReminder,4000);
     return;
   }
 
-  // 尚有未盤 → 確保此位置有計時起點
-  if(remindTimers[pos]==null) remindTimers[pos]=now;
-
   let html='<div class="rtitle">'+esc(pos)+'</div>';
   html+='<div class="rbig">'+remain.length+' <small>項未盤 / 共'+total+'</small></div>';
-  if(remain.length<=3){
+  if(remain.length<=LIST_THRESHOLD){
     html+='<div class="rlist">'+remain.map(sku=>'<span>· '+esc(CFG.items[sku].name)+'</span>').join('')+'</div>';
   }
   el.className="reminder show";
@@ -629,9 +701,11 @@ function newUid(){ return Date.now().toString(36)+"-"+Math.random().toString(36)
 function submit(op,value){
   if(!cur||!pos){ toast("請先掃描品項並選位置","err"); return; }
   const shown=op==="set"?Number(value).toFixed(2):(value>0?"+":"")+value;
+  const unit=(sec==="CA")?"瓶（目前）":(weigh?"桶（目前）":"個（目前）");
   const payload={uid:newUid(),sku:cur.sku,name:cur.name,block:CFG.sections[sec].block,
     header:CFG.sections[sec].header,writeCol,op,value,spec:spec||"",date:todayTab(),
     target:CFG.sections[sec].target||"day",   // 送哪支後端：CA→can（易開罐），其餘→day（日盤表）
+    wpos:pos, wunit:unit,                      // 跳窗用：位置、現值單位
     label:cur.name+"｜"+pos+(spec?"｜"+spec:"")+"｜"+shown};
   if(dualCfg){                                   // 雙格式：告訴後端要填哪一側、共有哪兩側
     payload.dual=dualSlot;
@@ -650,28 +724,78 @@ function processQueue(){
   clearTimeout(retryTimer);
   const payload=sendQueue[0];
   const url=(payload.target==="can")?CAN_SCRIPT_URL:SCRIPT_URL;   // CA 送易開罐後端，其餘送日盤表後端
+
+  // 若這筆先前送過(重試中)，先問後端「這個 uid 寫了沒」，避免重送造成 +1 變 +2
+  const preflight = payload._sent
+    ? checkUid(url,payload.uid)
+    : Promise.resolve(null);
+
+  preflight.then(chk=>{
+    if(chk && chk.status==="done"){
+      // 後端確認已寫入 → 直接當成功，拿現值，絕不重送
+      onWriteSuccess(payload,{success:true,written:chk.written,name:chk.name});
+      return null;
+    }
+    // unknown / processing / 查詢失敗 → 正常送出（processing 交給後端去重擋掉）
+    return sendOnce(url,payload);
+  }).catch(()=>{
+    // preflight 或送出流程的網路錯誤 → 退避重試
+    scheduleRetry();
+  });
+}
+
+// 送出一筆（帶 45 秒逾時）
+function sendOnce(url,payload){
+  payload._sent=true;   // 標記「送過了」，之後重試會先查 uid
   const ctrl=new AbortController();
-  const timeoutId=setTimeout(()=>ctrl.abort(),25000);   // 25 秒沒回應視為逾時，走重試
-  fetch(url,{method:"POST",body:JSON.stringify(payload),signal:ctrl.signal})
+  const timeoutId=setTimeout(()=>ctrl.abort(),45000);   // 45 秒（Apps Script 冷啟動有時很慢，太短會誤判逾時而重試）
+  return fetch(url,{method:"POST",body:JSON.stringify(payload),signal:ctrl.signal})
     .then(async r=>{ const txt=await r.text();
       try{ return JSON.parse(txt); }
       catch(e){ throw new Error("回應非 JSON（權限或未部署）"); } })
-    .then(res=>{
-      clearTimeout(timeoutId);
-      sendQueue.shift(); retryCount=0;
-      if(!res.success){                                  // 後端明確拒絕：重試也不會好 → 進失敗清單
-        failedList.push({label:payload.label,err:res.error||"寫入失敗"});
-        toast("✗ "+payload.name+"："+(res.error||"寫入失敗"),"err");
-      }
-      saveQ(); flushing=false; updatePending(); processQueue();
-    })
-    .catch(e=>{                                          // 網路/逾時：保留在佇列，退避後重試
-      clearTimeout(timeoutId);
-      flushing=false; retryCount++;
-      updatePending(true);
-      const delay=Math.min(30000, 1500*Math.pow(2,Math.min(retryCount,5)));
-      retryTimer=setTimeout(processQueue,delay);
-    });
+    .then(res=>{ clearTimeout(timeoutId); onWriteSuccess(payload,res); })
+    .catch(e=>{ clearTimeout(timeoutId); scheduleRetry(); });
+}
+
+// 查詢 uid 狀態（GET，帶 15 秒逾時）；失敗回 null（當作查不到，走正常重送）
+function checkUid(url,uid){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),15000);
+  return fetch(url+"?checkUid="+encodeURIComponent(uid),{method:"GET",signal:ctrl.signal})
+    .then(r=>r.text()).then(txt=>{ clearTimeout(t); try{return JSON.parse(txt);}catch(e){return null;} })
+    .catch(()=>{ clearTimeout(t); return null; });
+}
+
+// 寫入成功（含後端去重回覆）的統一處理
+function onWriteSuccess(payload,res){
+  sendQueue.shift(); retryCount=0;
+  if(!res.success){                                  // 後端明確拒絕：重試也不會好 → 進失敗清單
+    failedList.push({label:payload.label,err:res.error||"寫入失敗"});
+    toast("✗ "+payload.name+"："+(res.error||"寫入失敗"),"err");
+  }else if(res.written!==undefined && res.written!==null){
+    showCurrent(payload,res.written);                // 跳窗顯示盤點表現值（1 秒、後蓋前）
+  }
+  saveQ(); flushing=false; updatePending(); processQueue();
+}
+
+function scheduleRetry(){
+  flushing=false; retryCount++;
+  updatePending(true);
+  const delay=Math.min(30000, 1500*Math.pow(2,Math.min(retryCount,5)));
+  retryTimer=setTimeout(processQueue,delay);
+}
+
+// 成功後跳窗顯示盤點表現值：畫面中央浮 1 秒、後蓋前、不打斷操作
+let curPopT=null;
+function showCurrent(payload,written){
+  const el=$("curpop");
+  const title=(payload.name||"")+(payload.wpos?"｜"+payload.wpos:"");
+  el.innerHTML='<div class="cpname">'+esc(title)+'</div>'+
+               '<div class="cpval">'+esc(String(written))+'</div>'+
+               '<div class="cpunit">'+esc(payload.wunit||"目前數量")+'</div>';
+  el.className="curpop show";
+  clearTimeout(curPopT);                      // 後蓋前：連續送出只留最新一筆
+  curPopT=setTimeout(()=>{ el.className="curpop"; },1000);   // 1 秒後淡出
 }
 function updatePending(retrying){
   const el=$("pending"); let parts=[];

@@ -309,15 +309,20 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
   return m+day;}
 
 /* ==================== 位置盤點提示（reminder） ====================
- * 需求：一個位置一個位置盤，掃到某位置的品項時，提示這位置還剩幾項沒盤。
+ * 品項 reminder（JZ/HB/YG/BP）：即時讀取當天分頁該位置那一欄，空白＝沒盤過。
  *  - 應盤清單：跨區段，凡 positions 含此位置名的品項都算（啟動時自動建反查表）
- *  - 已盤：對「該位置+該品項」送出過任一筆就算（重複送只算一次）
- *  - ≤3 項列品名，>3 只顯示數字
- *  - 出現後 10 分鐘該位置仍沒盤完 → 卡片消失、計時歸零；再掃到該位置又重新出現計時
- *  - 已盤記錄跟著營業日，換日自動清空
+ *  - 已盤判定 = 「試算表讀到非空白」OR「本次連線自己送出過」（後者是樂觀標記，
+ *    避免自己剛送出、佇列還沒真正寫進表格時，畫面又把它當成沒盤）
+ *  - 雙格式品項（如 9*9衛生紙@一倉）：必須兩側都有數字才算已盤，缺一側仍算未盤
+ *  - ≤5 項列品名，>5 只顯示數字
+ *  - 讀取結果快取幾秒，避免同一位置連續掃描時狂打後端
+ *  - 讀取失敗（離線等）→ 退回純本地標記，不會整個顯示不出來
+ *
+ * CA 位置 reminder：維持原本機制（本地記錄＋1小時重設），未改動。
  * =============================================================== */
-const REMIND_RESET = 60*60*1000;   // 1 小時：到時把該位置的已盤記錄清空，reminder 從頭重算
 const LIST_THRESHOLD = 5;          // 未盤 ≤5 項時列出品名
+const LIVE_CACHE_MS = 5000;        // 即時讀取結果快取 5 秒，避免連續掃描狂打後端
+const CA_REMIND_RESET = 60*60*1000; // CA 位置 reminder：1 小時重設（維持原機制不變）
 
 // 不納入 reminder 的品項（活動調酒，所有位置都排除）
 const REMIND_EXCLUDE = {"JZ010":1,"HB010":1};
@@ -332,7 +337,6 @@ function inItemReminder(sku){
 // 只有這兩個位置要拆 JZ / HB（因 JZ、HB 的插管/未插同名，需分開計算）；
 // 其他位置維持用「位置名」聚合（跨區段）。
 const SPLIT_POS = {"吧檯插管":1, "吧檯未插":1};
-// 產生 reminder 分組的 key：需拆分的位置用「區段::位置」，其餘用「位置名」
 function remindKey(secName,posName){
   return SPLIT_POS[posName] ? (secName+"::"+posName) : posName;
 }
@@ -352,11 +356,12 @@ const POS_ITEMS = (function(){
 // CA 位置 reminder：掃到 CA 時，顯示還有哪些「位置」沒盤（跨品項，某位置輸入過任一 CA 品項就算該位置完成）
 const CA_POSITIONS = (CFG.sections.CA && CFG.sections.CA.positions) ? CFG.sections.CA.positions.slice() : [];
 
-// 已盤記錄：{ "位置名::sku": true }（品項 reminder）與 { "CA位置名": true }（CA 位置 reminder）
-// 都跟著營業日；換日自動重置
+// 本地樂觀標記：{ "位置key::sku": true }（品項 reminder 的 fallback / OR 條件）
+// { "CA位置名": true }（CA 位置 reminder，維持原機制）
+// 都跟著營業日；換日自動清空
 let doneDay = todayTab();
-let doneSet = {};        // 品項 reminder 用
-let caDoneSet = {};      // CA 位置 reminder 用
+let doneSet = {};        // 品項 reminder 本地標記
+let caDoneSet = {};      // CA 位置 reminder 用（不變）
 try{
   const saved=JSON.parse(localStorage.getItem("doneSet")||"{}");
   if(saved.day===todayTab()){ doneSet=saved.map||{}; caDoneSet=saved.ca||{}; }
@@ -364,56 +369,119 @@ try{
 function saveDone(){ localStorage.setItem("doneSet",JSON.stringify({day:doneDay,map:doneSet,ca:caDoneSet})); }
 function checkDayRollover(){
   const t=todayTab();
-  if(t!==doneDay){ doneDay=t; doneSet={}; caDoneSet={}; saveDone(); remindTimers={}; }
+  if(t!==doneDay){ doneDay=t; doneSet={}; caDoneSet={}; saveDone(); remindTimers={}; liveCache={}; }
 }
 function markDone(posName,sku){
   checkDayRollover();
   const it=CFG.items[sku];
   if(it && it.sec==="CA"){
-    caDoneSet[posName]=true;     // CA：記錄「此位置已盤」（跨品項）
+    caDoneSet[posName]=true;     // CA：記錄「此位置已盤」（跨品項，機制不變）
   }else if(inItemReminder(sku)){
     const k=remindKey(it.sec,posName);
-    doneSet[k+"::"+sku]=true;
+    doneSet[k+"::"+sku]=true;   // 品項 reminder：本地樂觀標記（OR 條件之一）
   }
   saveDone();
-}
-function remainingFor(secName,posName){
-  const k=remindKey(secName,posName);
-  const all=POS_ITEMS[k]||[];
-  const rem=all.filter(sku=>!doneSet[k+"::"+sku]);
-  return {key:k, total:all.length, remain:rem};
 }
 function caRemaining(){
   const rem=CA_POSITIONS.filter(p=>!caDoneSet[p]);
   return {total:CA_POSITIONS.length, remain:rem};
 }
 
-// 每個位置的計時起點（1 小時重設用）
+// CA 用：1 小時重設（機制不變，只保留給 CA）
 let remindTimers={};
 let remindTick=null;
-
-// 1 小時重設檢查：某分組首次出現 reminder 後滿 1 小時 → 清空該分組已盤記錄、計時歸零 → 從頭算
 function checkPosReset(key){
   const t=remindTimers[key];
-  if(t!=null && (Date.now()-t)>REMIND_RESET){
-    if(key==="__CA__"){
-      caDoneSet={};                                  // CA：清空所有位置已盤
-    }else{
-      const all=POS_ITEMS[key]||[];
-      all.forEach(sku=>{ delete doneSet[key+"::"+sku]; });   // 清空此分組所有品項已盤
-    }
-    saveDone();
-    delete remindTimers[key];                        // 計時歸零，下面會重新設起點
+  if(t!=null && (Date.now()-t)>CA_REMIND_RESET){
+    caDoneSet={}; saveDone();
+    delete remindTimers[key];
     return true;
   }
   return false;
 }
 
+// ---- 即時讀取（品項 reminder 專用）----
+let liveCache={};   // { key: {ts, data:{total,remain[]}} }
+
+// 判斷某品項在某位置的儲存格值是否算「已盤」
+//  一般品項：非空白即算已盤
+//  雙格式品項（該品項在此位置有 dualSpec）：必須兩側都是數字才算已盤，缺一側仍算未盤
+function isFilledValue(sku,posName,raw){
+  const it=CFG.items[sku];
+  if(it.dualSpec && it.dualSpec[posName]){
+    const slots=it.dualSpec[posName].slots;
+    const parts=String(raw==null?"":raw).split("/");
+    if(parts.length<slots.length) return false;
+    for(let i=0;i<slots.length;i++){
+      const c=(parts[i]==null?"":String(parts[i]).trim());
+      if(c===""||c.toLowerCase()==="n"||isNaN(Number(c))) return false;
+    }
+    return true;
+  }
+  return !(raw===""||raw==null);
+}
+function groupByBlock(skus){
+  const byBlock={};
+  skus.forEach(sku=>{
+    const it=CFG.items[sku];
+    const block=CFG.sections[it.sec].block;
+    (byBlock[block]=byBlock[block]||[]).push(sku);
+  });
+  return byBlock;
+}
+
+// 向後端要「這個位置這些品項現在的儲存格值」，回傳 {total, remain:[sku...]}
+// 已盤 = 試算表非空白（雙格式需兩側皆有數字） OR 本地樂觀標記
+async function fetchLiveRemain(secName,posName){
+  const k=remindKey(secName,posName);
+  const skus=POS_ITEMS[k]||[];
+  if(skus.length===0) return {total:0,remain:[]};
+
+  const cached=liveCache[k];
+  if(cached && (Date.now()-cached.ts)<LIVE_CACHE_MS) return cached.data;
+
+  const byBlock=groupByBlock(skus);
+  const reqs=Object.keys(byBlock).map(block=>{
+    const list=byBlock[block];
+    const namesParam=encodeURIComponent(list.map(sku=>CFG.items[sku].name).join("|"));
+    const url=SCRIPT_URL+"?remind=1&block="+encodeURIComponent(block)+"&col="+encodeURIComponent(posName)+"&names="+namesParam;
+    const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),8000);
+    return fetch(url,{signal:ctrl.signal}).then(r=>r.text())
+      .then(txt=>{ clearTimeout(t); try{return JSON.parse(txt);}catch(e){return {success:false};} })
+      .then(res=>({list,res}))
+      .catch(()=>{ clearTimeout(t); return {list,res:{success:false}}; });
+  });
+
+  const results=await Promise.all(reqs);
+  const remain=[];
+  results.forEach(({list,res})=>{
+    list.forEach(sku=>{
+      const localDone = !!doneSet[k+"::"+sku];
+      if(res && res.success){
+        const it=CFG.items[sku];
+        const raw = res.values ? res.values[it.name] : "";
+        const liveFilled = isFilledValue(sku,posName,raw);
+        if(!(liveFilled || localDone)) remain.push(sku);
+      }else{
+        // 這個區段讀取失敗 → 退回純本地標記
+        if(!localDone) remain.push(sku);
+      }
+    });
+  });
+
+  const data={total:skus.length, remain};
+  liveCache[k]={ts:Date.now(), data};
+  return data;
+}
+
+let reminderToken=0;
+
 function updateReminder(fromAction){
   checkDayRollover();
   const el=$("reminder");
+  const myToken=++reminderToken;
 
-  // CA 走位置 reminder
+  // CA 走位置 reminder（機制不變：本地記錄 + 1 小時重設）
   if(cur && sec==="CA"){
     checkPosReset("__CA__");
     if(remindTimers["__CA__"]==null) remindTimers["__CA__"]=Date.now();
@@ -426,7 +494,6 @@ function updateReminder(fromAction){
     }
     let html='<div class="rtitle">易開罐 未盤位置</div>';
     html+='<div class="rbig">'+remain.length+' <small>個位置 / 共'+total+'</small></div>';
-    // CA 位置少，一律全列（你的要求：所有剩餘位置始終顯示）
     html+='<div class="rlist">'+remain.map(p=>'<span>· '+esc(p)+'</span>').join('')+'</div>';
     el.className="reminder show";
     el.innerHTML=html;
@@ -434,22 +501,35 @@ function updateReminder(fromAction){
     return;
   }
 
-  // 其他區段走品項 reminder
+  // 其他區段走品項 reminder（即時讀取）
   if(!pos || !cur){ hideReminder(); return; }
   const k=remindKey(sec,pos);
   if(!POS_ITEMS[k] || POS_ITEMS[k].length===0){ hideReminder(); return; }
-  checkPosReset(k);
-  if(remindTimers[k]==null) remindTimers[k]=Date.now();
 
-  const {total,remain}=remainingFor(sec,pos);
+  // 立即用快取或本地標記先顯示，避免等待期間畫面空白
+  const immediate = liveCache[k] ? liveCache[k].data : (function(){
+    const all=POS_ITEMS[k];
+    const rem=all.filter(sku=>!doneSet[k+"::"+sku]);
+    return {total:all.length, remain:rem};
+  })();
+  renderReminderCard(pos, immediate.total, immediate.remain);
+
+  // 背景抓即時資料，抓到後（且使用者仍在同一位置，token 沒過期）才刷新畫面
+  fetchLiveRemain(sec,pos).then(data=>{
+    if(myToken!==reminderToken) return;   // 使用者已切走，這次結果作廢
+    renderReminderCard(pos, data.total, data.remain);
+  }).catch(()=>{});
+}
+
+function renderReminderCard(title,total,remain){
+  const el=$("reminder");
   if(remain.length===0){
     el.className="reminder show done";
-    el.innerHTML='<div class="rtitle">'+esc(pos)+'</div><div class="rdone">✓ 此位置已盤完</div>';
+    el.innerHTML='<div class="rtitle">'+esc(title)+'</div><div class="rdone">✓ 此位置已盤完</div>';
     clearTimeout(el._hideT); el._hideT=setTimeout(hideReminder,4000);
     return;
   }
-
-  let html='<div class="rtitle">'+esc(pos)+'</div>';
+  let html='<div class="rtitle">'+esc(title)+'</div>';
   html+='<div class="rbig">'+remain.length+' <small>項未盤 / 共'+total+'</small></div>';
   if(remain.length<=LIST_THRESHOLD){
     html+='<div class="rlist">'+remain.map(sku=>'<span>· '+esc(CFG.items[sku].name)+'</span>').join('')+'</div>';

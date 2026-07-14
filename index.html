@@ -334,7 +334,7 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
  * CA 位置 reminder：維持原本機制（本地記錄＋1小時重設），未改動。
  * =============================================================== */
 const LIST_THRESHOLD = 5;          // 未盤 ≤5 項時列出品名
-const LIVE_CACHE_MS = 5000;        // 即時讀取結果快取 5 秒，避免連續掃描狂打後端
+const LIVE_CACHE_MS = 2000;        // 即時讀取快取 2 秒（配合 3 秒自動刷新，避免讀到過舊資料）
 const OPTIMISTIC_GRACE_MS = 20000; // 送出後 20 秒寬限期：期間即使盤點表還讀到空白，也維持「已盤」不彈回（等佇列寫完）
 const CA_REMIND_RESET = 60*60*1000; // CA 位置 reminder：1 小時重設（維持原機制不變）
 
@@ -469,7 +469,9 @@ async function fetchLiveRemain(secName,posName){
   const results=await Promise.all(reqs);
   const now=Date.now();
   const remain=[];
+  let anyOk=false, anyFail=false;
   results.forEach(({list,res})=>{
+    if(res && res.success) anyOk=true; else anyFail=true;
     list.forEach(sku=>{
       const dkey=k+"::"+sku;
       const justSent = doneSet[dkey] && (now-doneSet[dkey])<OPTIMISTIC_GRACE_MS;  // 剛送出、還在寬限期
@@ -494,8 +496,9 @@ async function fetchLiveRemain(secName,posName){
   });
   saveDone();
 
-  const data={total:skus.length, remain};
-  liveCache[k]={ts:Date.now(), data};
+  const data={total:skus.length, remain, allFailed:(anyFail && !anyOk)};
+  // 全部讀取失敗時不更新快取（保留上次成功的資料），成功才更新
+  if(anyOk) liveCache[k]={ts:Date.now(), data};
   return data;
 }
 
@@ -542,6 +545,7 @@ function updateReminder(fromAction){
   // 背景抓即時資料，抓到後（且使用者仍在同一位置，token 沒過期）才刷新畫面
   fetchLiveRemain(sec,pos).then(data=>{
     if(myToken!==reminderToken) return;   // 使用者已切走，這次結果作廢
+    if(data.allFailed) return;            // 讀取全失敗：保留立即顯示的內容，不刷成殘缺資料
     renderReminderCard(pos, data.total, data.remain);
   }).catch(()=>{});
 }
@@ -850,24 +854,30 @@ function submit(op,value){
   optimisticDone(pos,cur.sku);   // 送出瞬間：立即樂觀標記並 -1（不等讀取）
 }
 
-// 送出瞬間的樂觀處理：立即把此品項標記已盤、清掉該位置快取、立即重畫（reminder 馬上 -1）
+// 送出瞬間的樂觀處理：把剛送出這一項從「上次已知的未盤清單」移除，立即 -1（不全量重算，避免閃動）
 // 雙格式（空桶大/小、9*9衛生紙假清/烘焙）：要兩側都送過才算盤完，只送一側不 -1
 function optimisticDone(posName,sku){
   const it=CFG.items[sku];
+  let counted=true;   // 這次送出是否算「該品項已盤」（雙格式只送一側時 false）
   if(it && it.sec!=="CA" && it.dualSpec && it.dualSpec[posName]){
-    // 雙格式：記錄已送出的側別，兩側齊全才 markDone
     const dk="dualSent::"+remindKey(it.sec,posName)+"::"+sku;
     let sent=[]; try{ sent=JSON.parse(localStorage.getItem(dk)||"[]"); }catch(e){}
     if(dualSlot && sent.indexOf(dualSlot)===-1) sent.push(dualSlot);
     localStorage.setItem(dk,JSON.stringify(sent));
     const need=(it.dualSpec[posName].slots||[]).length;
-    if(sent.length>=need){ markDone(posName,sku); }   // 兩側都送過 → 算已盤
+    if(sent.length>=need){ markDone(posName,sku); } else { counted=false; }
   }else{
     markDone(posName,sku);
   }
-  // 清掉該位置快取，讓下面的 updateReminder 立即反映最新本地標記，並觸發背景校驗
+
   const k=remindKey(sec,posName);
-  delete liveCache[k];
+  // 關鍵：不清空快取、不全量重算。直接從「上次已知的未盤清單」移除剛送的這一項，
+  // 這樣立即顯示只會正確地 -1（例如 5→4），不會因為退回純本地計算而短暫暴增。
+  if(counted && liveCache[k] && liveCache[k].data){
+    const d=liveCache[k].data;
+    const nr=d.remain.filter(s=>s!==sku);
+    liveCache[k]={ts:0, data:{total:d.total, remain:nr}};  // ts=0：標記為「需背景校驗」，但保留當前清單顯示
+  }
   updateReminder(true);
 }
 function processQueue(){
@@ -995,7 +1005,20 @@ $("skuInput").addEventListener("keydown",e=>{ if(e.key==="Enter") confirmSku(); 
 updatePending();
 processQueue();   // 開頁時若上次還有沒傳完的，先續傳
 // 每 20 秒檢查一次：讓 reminder 的 10 分鐘逾時即使使用者沒動作也能自動消失
-remindTick=setInterval(()=>{ if($("reminder").classList.contains("show")) updateReminder(); },20000);
+// 每 3 秒自動刷新 reminder（反映隊友在另一支手機的盤點）；只在卡片顯示時跑，讀取失敗保留原畫面
+remindTick=setInterval(()=>{
+  if(!$("reminder").classList.contains("show")) return;
+  if(!cur) return;
+  if(sec==="CA"){ updateReminder(); return; }        // CA 走本地機制，直接更新
+  const k=remindKey(sec,pos);
+  if(!POS_ITEMS[k] || POS_ITEMS[k].length===0) return;
+  const myToken=++reminderToken;
+  fetchLiveRemain(sec,pos).then(data=>{
+    if(myToken!==reminderToken) return;              // 已切走則作廢
+    if(data.allFailed) return;                       // 讀取全失敗：保留原畫面，不跳動
+    renderReminderCard(pos, data.total, data.remain);
+  }).catch(()=>{});                                   // 例外：什麼都不做，保留原畫面
+},3000);
 startScan();
 </script>
 </body>

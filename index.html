@@ -1052,7 +1052,8 @@ $("scanInput").addEventListener("keydown",onScanInputEnter);
 // 若在這段時間內呼叫 .focus()，會被誤判成「使用者要打字」而跳出螢幕鍵盤（且不會自動收回）。
 // 延遲夠久（跟開啟手勢脫鉤）再聚焦，就不會有這個問題；Safari 網址列開啟則不受影響，延遲對它无感。
 setTimeout(refocusScanInput,1000);
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refocusScanInput(); });
+// 從背景切回前景時同樣要延遲：立即 focus 會被系統當成「剛切回來的手勢」而跳鍵盤（Safari、PWA 皆同）
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) setTimeout(refocusScanInput,1000); });
 // 讓所有按鈕在被點下的瞬間，不搶走 #scanInput 的焦點（onclick 功能完全不受影響，只是不轉移焦點）。
 // 這樣掃碼槍輸入框全程保持聚焦，不需要「點擊後再搶回焦點」──而正是那個「搶回」動作
 // 在手機上會被系統當成使用者要打字，跳出螢幕鍵盤。從源頭不讓焦點被搶走，就不會有這個問題。

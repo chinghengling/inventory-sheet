@@ -21,6 +21,7 @@
   .manualbtn{flex:0 0 auto; height:80%; padding:0 11px; border-radius:9px; border:1px solid var(--line);
     background:var(--panel); color:var(--ink); font-size:clamp(11px,2vh,13px); font-weight:700; white-space:nowrap;}
   .manualbtn:active{background:var(--pick);}
+  .manualbtn.scanon{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
   .name b{font-size:clamp(15px,3vh,21px); font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .name .sku{font-size:clamp(11px,1.8vh,13px); color:var(--dim); font-variant-numeric:tabular-nums;}
   .name .empty{font-size:clamp(13px,2.4vh,16px); color:var(--dim); font-weight:600;}
@@ -120,7 +121,7 @@
 <body>
   <div class="name">
     <div class="nametext" id="nameBar"><span class="empty">對準條碼開始盤點</span></div>
-    <button class="manualbtn" onclick="focusScanInput()">📡</button>
+    <button class="manualbtn" id="scanBtn" onclick="toggleScanMode()">📡</button>
     <button class="manualbtn" onclick="manualSku()">⌨ SKU</button>
   </div>
   <input id="scanInput" type="text" autocomplete="off" autocapitalize="characters"
@@ -630,15 +631,28 @@ function confirmSku(){
   if(!applyCode(code,true)) toast("查無此 SKU："+code,"err");
 }
 
-// ---------- 藍牙掃碼槍（HID 鍵盤模擬）支援 ----------
-// 設計原則：只有使用者親手點擊「📡」按鈕的那一瞬間才呼叫一次 .focus()（貨真價實的使用者手勢），
-// 絕不用計時器、visibilitychange、或攔截按鈕點擊等方式「自動」搶回焦點——那些都會被手機系統
-// 誤判成「要打字」而跳出螢幕鍵盤，或干擾到其他按鈕的點擊。掃完一枚條碼後欄位仍保持焦點，
-// 可以連續掃下一枚；若之後手指點了別的按鈕（例如切位置），焦點會自然移開，
-// 這時只要再點一次「📡」即可恢復，不需要額外的「關閉」動作。
-function focusScanInput(){
-  $("scanInput").focus();
-  toast("📡 掃碼槍已就緒，請掃描","ok");
+// ---------- 藍牙掃碼槍（HID 鍵盤模擬）支援：開關式模式（方案 C）----------
+// 點一下「📡」開啟掃碼槍模式（按鈕高亮），再點一下關閉。
+// 開啟期間：焦點保持在隱藏輸入框，可連續掃描；若手指點了別的按鈕（切位置等）導致焦點移開，
+//   會在「放開手指的瞬間」（pointerup/touchend，而非按下時）把焦點還回來——放開時的 focus
+//   比較不會被 iOS 當成「要打字」而跳鍵盤。關閉模式後，完全不做任何焦點維持，不干擾一般操作。
+let scanMode=false;
+function toggleScanMode(){
+  scanMode=!scanMode;
+  $("scanBtn").classList.toggle("scanon",scanMode);
+  if(scanMode){
+    $("scanInput").focus();
+    toast("📡 掃碼槍模式開啟，可連續掃描","ok");
+  }else{
+    $("scanInput").blur();
+    toast("掃碼槍模式關閉","ok");
+  }
+}
+function refocusIfScanMode(){
+  if(!scanMode) return;
+  if($("skuModal").style.display==="flex") return;   // 手動 SKU 視窗開著時不搶
+  const si=$("scanInput");
+  if(document.activeElement!==si) si.focus();
 }
 $("scanInput").addEventListener("keydown",e=>{
   if(e.key!=="Enter") return;
@@ -647,6 +661,9 @@ $("scanInput").addEventListener("keydown",e=>{
   if(!code) return;
   if(!applyCode(code,true)) toast("查無此 SKU："+code,"err");
 });
+// 只在放開手指的瞬間還原焦點，且僅限掃碼槍模式開啟時
+document.addEventListener("pointerup",()=>{ if(scanMode) setTimeout(refocusIfScanMode,0); });
+document.addEventListener("touchend",()=>{ if(scanMode) setTimeout(refocusIfScanMode,0); });
 
 // ---------- 掃碼：支援「SKU＋兩碼位置後綴」自動帶入位置 ----------
 // 條碼格式：兩碼英文＋三碼數字（＋可選兩碼位置後綴），例如 JZ001、HB003DF、BP012SA

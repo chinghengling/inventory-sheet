@@ -166,6 +166,12 @@
     </div>
   </div>
 
+  <!-- 藍牙掃碼槍輸入框：掃碼槍本質是「藍牙鍵盤」，會把條碼內容打進目前有焦點的欄位並自動送 Enter。
+       這個欄位常駐保持焦點（SKU 手動輸入視窗開啟時除外），讓掃碼槍隨時可用，不用另外點開任何東西。
+       離螢幕但可聚焦（不能用 display:none，那樣無法 focus）；font-size:16px 避免萬一被 iOS 判定為使用者點擊而觸發縮放。 -->
+  <input id="scanInput" type="text" autocomplete="off" autocapitalize="characters"
+    style="position:fixed; top:-100px; left:-100px; width:1px; height:1px; opacity:0; font-size:16px; border:none;"/>
+
 <script>
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw-B0NMCe5bdKrBEfAZGCIHNeLEWWXo1jlfloCjs7JQeg4mXvgkEQzr95r0dnm7wW0dxA/exec";
@@ -618,10 +624,26 @@ function manualSku(){
   $("skuModal").style.display="flex";
   const i=$("skuInput"); i.value=""; setTimeout(()=>i.focus(),50);
 }
-function closeSku(){ $("skuModal").style.display="none"; }
+function closeSku(){ $("skuModal").style.display="none"; refocusScanInput(); }
 function confirmSku(){
   const code=$("skuInput").value.trim().toUpperCase();
   closeSku();
+  if(!code) return;
+  if(!applyCode(code,true)) toast("查無此 SKU："+code,"err");
+}
+
+// ---------- 藍牙掃碼槍（HID 鍵盤模擬）支援 ----------
+// 掃碼槍會把條碼內容打進目前有焦點的欄位，並自動送出 Enter。
+// #scanInput 常駐保持焦點，掃到碼＋Enter 就直接走跟手動輸入 SKU 一樣的 applyCode() 判斷。
+function refocusScanInput(){
+  if($("skuModal").style.display==="flex") return;   // SKU 手動輸入視窗開著時，焦點留給那個欄位
+  const si=$("scanInput");
+  if(si && document.activeElement!==si) si.focus();
+}
+function onScanInputEnter(e){
+  if(e.key!=="Enter") return;
+  const code=$("scanInput").value.trim().toUpperCase();
+  $("scanInput").value="";
   if(!code) return;
   if(!applyCode(code,true)) toast("查無此 SKU："+code,"err");
 }
@@ -789,13 +811,12 @@ function updateHint(){
 }
 
 // 3×5：1-9 . 0 ⌫ ＋ 最後一列 +1 -1 輸入
-const KEYS=["1","2","3","4","5","6","7","8","9",".","0","⌫","+1","-1","輸入"];
+const KEYS=["1","2","3","4","5","6","7","8","9",".","0","⌫","-","-1","輸入"];
 function renderPad(){
   const pad=$("pad"); pad.innerHTML="";
   KEYS.forEach(k=>{
     const b=document.createElement("button"); b.textContent=k; b.className="key";
-    if(k==="+1"){b.className+=" plus"; b.onclick=()=>submit("add",mult);}
-    else if(k==="-1"){b.className+=" minus"; b.onclick=()=>submit("add",-mult);}
+    if(k==="-1"){b.className+=" minus"; b.onclick=()=>submit("add",-mult);}
     else if(k==="輸入"){b.className+=" enter"; b.onclick=()=>press("輸入");}
     else b.onclick=()=>press(k);
     pad.appendChild(b);
@@ -804,6 +825,10 @@ function renderPad(){
 function press(k){
   if(k==="⌫"){ disp=disp.slice(0,-1); setDisp(disp); updateHint(); return; }
   if(k==="."){ if(!disp.includes("."))disp=(disp||"0")+"."; setDisp(disp); return; }
+  if(k==="-"){                                    // 負號切換：再按一次取消，讓使用者能手動輸入任意負值
+    disp = disp.startsWith("-") ? disp.slice(1) : ("-"+disp);
+    setDisp(disp); updateHint(); return;
+  }
   if(/[0-9]/.test(k)){ if(disp==="0")disp=""; disp+=k; setDisp(disp); updateHint(); return; }
   if(k==="輸入"){
     const n=parseFloat(disp);
@@ -1020,6 +1045,12 @@ remindTick=setInterval(()=>{
   }).catch(()=>{});                                   // 例外：什麼都不做，保留原畫面
 },3000);
 startScan();
+
+// 藍牙掃碼槍：綁定 Enter 事件、初始聚焦、並在畫面上任何點擊後把焦點搶回來（SKU 視窗開著時除外）
+$("scanInput").addEventListener("keydown",onScanInputEnter);
+refocusScanInput();
+document.addEventListener("click",()=>{ setTimeout(refocusScanInput,0); });
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refocusScanInput(); });
 </script>
 </body>
 </html>

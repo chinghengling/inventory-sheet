@@ -29,7 +29,14 @@
   .camwrap{height:27dvh; display:flex; align-items:stretch; justify-content:center; gap:6px; padding:0 6px;}
   #reader{height:27dvh; width:27dvh; flex:0 0 auto; background:#000; overflow:hidden; position:relative;}
   #reader video{width:100%; height:100%; object-fit:cover;}
-  .reminder{flex:1 1 0; min-width:0; align-self:center; max-height:100%; overflow:hidden;
+  .rightcol{flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:4px;}
+  .itemnav{display:flex; gap:6px; justify-content:center;}
+  .navbtn{flex:1; max-width:52px; height:26px; border-radius:8px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink); font-size:13px; font-weight:700; line-height:1;
+    display:flex; align-items:center; justify-content:center;}
+  .navbtn:active{background:var(--pick);}
+  .navbtn:disabled{opacity:.3;}
+  .reminder{min-width:0; max-height:100%; overflow:hidden;
     display:none; flex-direction:column; justify-content:center; gap:4px;
     padding:8px 10px; border-radius:12px; border:1px solid var(--line);
     background:linear-gradient(180deg,#1B2430,#151B24);}
@@ -121,7 +128,13 @@
       <span class="scanning">● 掃描中 v3</span>
       <button class="torch" id="torchBtn" onclick="toggleTorch()">燈</button>
     </div>
-    <div class="reminder" id="reminder"></div>
+    <div class="rightcol">
+      <div class="itemnav" id="itemNav" style="display:none">
+        <button class="navbtn" id="navUp" onclick="stepItem(-1)">▲</button>
+        <button class="navbtn" id="navDown" onclick="stepItem(1)">▼</button>
+      </div>
+      <div class="reminder" id="reminder"></div>
+    </div>
   </div>
 
   <div class="optszone">
@@ -157,7 +170,7 @@
 // ===== 後端網址：要換 Apps Script 部署時，只改這一行引號內的網址 =====
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw-B0NMCe5bdKrBEfAZGCIHNeLEWWXo1jlfloCjs7JQeg4mXvgkEQzr95r0dnm7wW0dxA/exec";
 // ===== 易開罐後端網址：部署 can_backend.gs 後，把網址貼到這裡（掃到 CA 品項會送這支）=====
-const CAN_SCRIPT_URL = "請貼上易開罐後端的部署網址";
+const CAN_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwPy1PY5s4j8BSCRNj3m0rRko4EVQDdqiKhJ7iIa-jFQSKdGxBZVUvRbUs9e_Px9ti0/exec";
 // =================================================================
 
 /* =====================================================================
@@ -275,7 +288,7 @@ CFG.items = {
   "BP008": {"name":"粉紅垃圾袋","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","小倉(二店)"]},
   "BP009": {"name":"大垃圾袋","sec":"BP","positions":["假裝現場","烘焙現場","小倉(一店)","小倉(二店)"]},
   "BP010": {"name":"咖啡抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
-  "BP011": {"name":"白抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"],"spec":[["條",1],["包",12]]},
+  "BP011": {"name":"白抹布","sec":"BP","positions":["小倉(一店)","小倉(二店)"],"spec":[["包",12],["條",1]]},
   "BP012": {"name":"口布","sec":"BP","positions":["小倉(一店)","小倉(二店)"]},
   "BP013": {"name":"PLA大","sec":"BP","positions":["酉鬼","一倉"],"spec":[["箱",500],["條",25],["杯",1]],"posSpec":{"一倉":[["箱",500]]}},
   "BP014": {"name":"PLA小","sec":"BP","positions":["酉鬼","假裝現場","烘焙現場","小倉(一店)","一倉"],"spec":[["箱",500],["條",25],["杯",1]],"posSpec":{"小倉(一店)":[["條",25]],"一倉":[["箱",500]]}},
@@ -322,6 +335,7 @@ function todayTab(){const d=new Date(Date.now()-8*3600*1000);
  * =============================================================== */
 const LIST_THRESHOLD = 5;          // 未盤 ≤5 項時列出品名
 const LIVE_CACHE_MS = 5000;        // 即時讀取結果快取 5 秒，避免連續掃描狂打後端
+const OPTIMISTIC_GRACE_MS = 20000; // 送出後 20 秒寬限期：期間即使盤點表還讀到空白，也維持「已盤」不彈回（等佇列寫完）
 const CA_REMIND_RESET = 60*60*1000; // CA 位置 reminder：1 小時重設（維持原機制不變）
 
 // 不納入 reminder 的品項（活動調酒，所有位置都排除）
@@ -378,7 +392,7 @@ function markDone(posName,sku){
     caDoneSet[posName]=true;     // CA：記錄「此位置已盤」（跨品項，機制不變）
   }else if(inItemReminder(sku)){
     const k=remindKey(it.sec,posName);
-    doneSet[k+"::"+sku]=true;   // 品項 reminder：本地樂觀標記（OR 條件之一）
+    doneSet[k+"::"+sku]=Date.now();   // 品項 reminder：本地樂觀標記，存送出時間戳（供校驗寬限期判斷）
   }
   saveDone();
 }
@@ -453,21 +467,32 @@ async function fetchLiveRemain(secName,posName){
   });
 
   const results=await Promise.all(reqs);
+  const now=Date.now();
   const remain=[];
   results.forEach(({list,res})=>{
     list.forEach(sku=>{
-      const localDone = !!doneSet[k+"::"+sku];
+      const dkey=k+"::"+sku;
+      const justSent = doneSet[dkey] && (now-doneSet[dkey])<OPTIMISTIC_GRACE_MS;  // 剛送出、還在寬限期
       if(res && res.success){
+        // 成功讀到盤點表 → 以盤點表為準
         const it=CFG.items[sku];
         const raw = res.values ? res.values[it.name] : "";
         const liveFilled = isFilledValue(sku,posName,raw);
-        if(!(liveFilled || localDone)) remain.push(sku);
+        if(liveFilled){
+          delete doneSet[dkey];          // 盤點表已有值 → 清掉本地樂觀標記，之後以表為準
+        }else if(justSent){
+          // 盤點表還空白，但剛送出仍在寬限期（佇列可能還沒寫完）→ 暫時維持已盤，不彈回
+        }else{
+          remain.push(sku);              // 盤點表空白且非剛送出 → 確定未盤
+          delete doneSet[dkey];
+        }
       }else{
-        // 這個區段讀取失敗 → 退回純本地標記
-        if(!localDone) remain.push(sku);
+        // 讀取失敗（離線等）→ 退回本地樂觀標記，不因讀不到就把剛盤的彈回來
+        if(!doneSet[dkey]) remain.push(sku);
       }
     });
   });
+  saveDone();
 
   const data={total:skus.length, remain};
   liveCache[k]={ts:Date.now(), data};
@@ -649,6 +674,32 @@ function loadItem(sku,item){
             : (secDef && positions.includes(secDef)) ? secDef
             : positions[0];
   selectPos(def); setDisp("");
+  updateItemNav();   // 更新品項切換上下鍵（只有 JZ/HB/YG 顯示）
+}
+
+// 品項切換上下鍵：只在 JZ/HB/YG 品項顯示，切換同區段 001~010
+const NAV_SECTIONS = {"JZ":1,"HB":1,"YG":1};
+function updateItemNav(){
+  const nav=$("itemNav");
+  if(!cur || !NAV_SECTIONS[sec]){ nav.style.display="none"; return; }
+  nav.style.display="flex";
+  const n=parseInt(cur.sku.slice(2),10);
+  $("navUp").disabled = !(n>1 && CFG.items[sec+String(n-1).padStart(3,"0")]);      // 已在最小編號→停住
+  $("navDown").disabled = !CFG.items[sec+String(n+1).padStart(3,"0")];             // 已在最大編號→停住
+}
+// dir: -1=上一個(編號-1), +1=下一個(編號+1)
+function stepItem(dir){
+  if(!cur || !NAV_SECTIONS[sec]) return;
+  const n=parseInt(cur.sku.slice(2),10);
+  const nextSku=sec+String(n+dir).padStart(3,"0");
+  const nextItem=CFG.items[nextSku];
+  if(!nextItem) return;   // 邊界：沒有下一個就停住，不循環
+  const keepPos=pos;      // 記住目前位置，切換後盡量沿用
+  lastApplied="";         // 允許之後重掃同標籤
+  loadItem(nextSku,nextItem);
+  // 切換後：若原位置在新品項也支援，就沿用；否則 loadItem 已退回新品項第一個位置
+  const positions=nextItem.positions||CFG.sections[sec].positions;
+  if(keepPos && positions.includes(keepPos) && pos!==keepPos) selectPos(keepPos);
 }
 function selectPos(p){
   pos=p; lastPos[sec]=p; localStorage.setItem("lastPos",JSON.stringify(lastPos));
@@ -772,6 +823,7 @@ let sendQueue=[], failedList=[];
 try{ sendQueue=JSON.parse(localStorage.getItem("sendQueue")||"[]"); }catch(e){ sendQueue=[]; }
 try{ failedList=JSON.parse(localStorage.getItem("failedList")||"[]"); }catch(e){ failedList=[]; }
 let flushing=false, retryCount=0, retryTimer=null;
+const MAX_RETRY=6;   // 同一筆重試上限：超過就移到失敗清單、放行後續（避免一筆卡死整個佇列）
 function saveQ(){
   localStorage.setItem("sendQueue",JSON.stringify(sendQueue));
   localStorage.setItem("failedList",JSON.stringify(failedList));
@@ -795,8 +847,28 @@ function submit(op,value){
   sendQueue.push(payload); saveQ(); updatePending(); processQueue();
   toast("✓ "+payload.label,"ok");  // 立刻回饋；若之後傳送失敗會自動重試並在右下角顯示
   setDisp("");
-  markDone(pos,cur.sku);   // 標記「此位置+此品項」已盤（重複送只算一次）
-  updateReminder(true);    // 送出後重算此位置剩餘，實時更新提示
+  optimisticDone(pos,cur.sku);   // 送出瞬間：立即樂觀標記並 -1（不等讀取）
+}
+
+// 送出瞬間的樂觀處理：立即把此品項標記已盤、清掉該位置快取、立即重畫（reminder 馬上 -1）
+// 雙格式（空桶大/小、9*9衛生紙假清/烘焙）：要兩側都送過才算盤完，只送一側不 -1
+function optimisticDone(posName,sku){
+  const it=CFG.items[sku];
+  if(it && it.sec!=="CA" && it.dualSpec && it.dualSpec[posName]){
+    // 雙格式：記錄已送出的側別，兩側齊全才 markDone
+    const dk="dualSent::"+remindKey(it.sec,posName)+"::"+sku;
+    let sent=[]; try{ sent=JSON.parse(localStorage.getItem(dk)||"[]"); }catch(e){}
+    if(dualSlot && sent.indexOf(dualSlot)===-1) sent.push(dualSlot);
+    localStorage.setItem(dk,JSON.stringify(sent));
+    const need=(it.dualSpec[posName].slots||[]).length;
+    if(sent.length>=need){ markDone(posName,sku); }   // 兩側都送過 → 算已盤
+  }else{
+    markDone(posName,sku);
+  }
+  // 清掉該位置快取，讓下面的 updateReminder 立即反映最新本地標記，並觸發背景校驗
+  const k=remindKey(sec,posName);
+  delete liveCache[k];
+  updateReminder(true);
 }
 function processQueue(){
   if(flushing || sendQueue.length===0) return;
@@ -861,6 +933,30 @@ function onWriteSuccess(payload,res){
 function scheduleRetry(){
   flushing=false; retryCount++;
   updatePending(true);
+  if(retryCount>=MAX_RETRY){
+    // 重試已達上限：先最後查一次 uid，萬一其實已寫入（只是回應一直收不到）就當成功，
+    // 否則移到失敗清單、放行後續品項，不讓這一筆卡死整個佇列
+    const payload=sendQueue[0];
+    if(!payload){ return; }
+    const url=(payload.target==="can")?CAN_SCRIPT_URL:SCRIPT_URL;
+    checkUid(url,payload.uid).then(chk=>{
+      if(chk && chk.status==="done"){
+        onWriteSuccess(payload,{success:true,written:chk.written,name:chk.name});
+      }else{
+        sendQueue.shift(); retryCount=0;
+        failedList.push({label:payload.label,err:"多次重試失敗（可能離線或後端無回應），請手動補登"});
+        toast("✗ "+payload.name+"：多次重試失敗，已移至失敗清單","err");
+        saveQ(); flushing=false; updatePending(); processQueue();
+      }
+    }).catch(()=>{
+      // 連最後查詢都失敗 → 移到失敗清單、放行後續
+      sendQueue.shift(); retryCount=0;
+      failedList.push({label:payload.label,err:"多次重試失敗（可能離線或後端無回應），請手動補登"});
+      toast("✗ "+payload.name+"：多次重試失敗，已移至失敗清單","err");
+      saveQ(); flushing=false; updatePending(); processQueue();
+    });
+    return;
+  }
   const delay=Math.min(30000, 1500*Math.pow(2,Math.min(retryCount,5)));
   retryTimer=setTimeout(processQueue,delay);
 }

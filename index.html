@@ -636,13 +636,18 @@ function confirmSku(){
 // 開啟期間：焦點保持在隱藏輸入框，可連續掃描；若手指點了別的按鈕（切位置等）導致焦點移開，
 //   會在「放開手指的瞬間」（pointerup/touchend，而非按下時）把焦點還回來——放開時的 focus
 //   比較不會被 iOS 當成「要打字」而跳鍵盤。關閉模式後，完全不做任何焦點維持，不干擾一般操作。
+// 焦點安全網：放開手指那一瞬間的 pointerup/touchend 偶爾接不住（例如送出後一連串非同步處理
+//   影響時機），所以額外每 1.5 秒定期補檢查一次，避免焦點跑掉後就再也拉不回來、掃碼槍失效。
 let scanMode=false;
+let scanFocusWatch=null;
 function toggleScanMode(){
   scanMode=!scanMode;
   $("scanBtn").classList.toggle("scanon",scanMode);
+  clearInterval(scanFocusWatch);
   if(scanMode){
     $("scanInput").focus();
     toast("📡 掃碼槍模式開啟，可連續掃描","ok");
+    scanFocusWatch=setInterval(refocusIfScanMode,1500);
   }else{
     $("scanInput").blur();
     toast("掃碼槍模式關閉","ok");

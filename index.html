@@ -650,6 +650,21 @@ $("scanInput").addEventListener("keydown",e=>{
 document.addEventListener("pointerup",()=>{ setTimeout(refocusScan,0); });
 document.addEventListener("touchend",()=>{ setTimeout(refocusScan,0); });
 
+// 喚醒解鎖：App 從背景關掉再打開（掃碼槍藍牙仍連著）時，頁面沒有重新載入，也還沒發生過
+//   任何真正的使用者點擊，iOS 會擋掉這之前所有「非使用者手勢觸發」的 .focus() 呼叫（開場那次、
+//   以及上面的定期安全網都會被靜默忽略）。這裡監聽「重新整理/回到前景後的第一次觸碰」，
+//   同步（不經 setTimeout）立刻 focus，盡量搶在 iOS 判定手勢有效的窗口內，讓使用者點畫面
+//   任何地方一下（不必特地找按鈕）就能恢復掃碼槍輸入。
+function wakeUnlockFocus(){ $("scanInput").focus(); }
+document.addEventListener("touchstart",wakeUnlockFocus,{once:true});
+document.addEventListener("pointerdown",wakeUnlockFocus,{once:true});
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden){
+    document.addEventListener("touchstart",wakeUnlockFocus,{once:true});
+    document.addEventListener("pointerdown",wakeUnlockFocus,{once:true});
+  }
+});
+
 // ---------- 掃碼：支援「SKU＋兩碼位置後綴」自動帶入位置 ----------
 // 條碼格式：兩碼英文＋三碼數字（＋可選兩碼位置後綴），例如 JZ001、HB003DF、BP012SA
 let lastApplied="";   // 已套用過的完整條碼，避免持續掃描重複觸發

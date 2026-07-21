@@ -115,9 +115,14 @@
   .skubtns button{flex:1; padding:11px; border-radius:10px; border:1px solid var(--line); font-size:15px; font-weight:700;}
   .skucancel{background:var(--panel); color:var(--ink);}
   .skuok{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+  .scanlock{position:fixed; top:0; left:0; right:0; z-index:70; background:var(--accent); color:var(--accent-ink);
+    text-align:center; padding:9px 12px; font-size:13px; font-weight:800; transform:translateY(-100%);
+    transition:transform .2s; pointer-events:none;}
+  .scanlock.show{transform:translateY(0);}
 </style>
 </head>
 <body>
+  <div class="scanlock" id="scanLock">📡 請點一下畫面以啟動掃碼器</div>
   <div class="name">
     <div class="nametext" id="nameBar"><span class="empty">對準條碼開始盤點</span></div>
     <button class="manualbtn" onclick="manualSku()">⌨ SKU</button>
@@ -661,11 +666,15 @@ document.addEventListener("touchend",()=>{ setTimeout(refocusScan,0); });
 //   以及上面的定期安全網都會被靜默忽略）。這裡監聽「重新整理/回到前景後的第一次觸碰」，
 //   同步（不經 setTimeout）立刻 focus，盡量搶在 iOS 判定手勢有效的窗口內，讓使用者點畫面
 //   任何地方一下（不必特地找按鈕）就能恢復掃碼槍輸入。
-function wakeUnlockFocus(){ $("scanInput").focus(); }
+// 畫面提示：解鎖前顯示「請點一下畫面」提示條，讓使用者不用猜著點 SKU 鈕，點畫面任何地方都行。
+function showScanLock(){ $("scanLock").classList.add("show"); }
+function hideScanLock(){ $("scanLock").classList.remove("show"); }
+function wakeUnlockFocus(){ $("scanInput").focus(); hideScanLock(); }
 document.addEventListener("touchstart",wakeUnlockFocus,{once:true});
 document.addEventListener("pointerdown",wakeUnlockFocus,{once:true});
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden){
+    showScanLock();
     document.addEventListener("touchstart",wakeUnlockFocus,{once:true});
     document.addEventListener("pointerdown",wakeUnlockFocus,{once:true});
   }
@@ -1069,6 +1078,7 @@ remindTick=setInterval(()=>{
   }).catch(()=>{});                                   // 例外：什麼都不做，保留原畫面
 },3000);
 $("scanInput").focus();
+showScanLock();
 setInterval(refocusScan,1500);
 startScan();
 </script>

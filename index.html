@@ -312,6 +312,12 @@ CFG.items["CA002"] = {"name":"綠 / 桂花","sec":"CA"};
 CFG.items["CA003"] = {"name":"藍／白桃","sec":"CA"};
 CFG.items["CA004"] = {"name":"粉／荔枝","sec":"CA"};
 
+// ---- 原廠條碼（EAN）對應內部 SKU：掃到這些條碼時視同掃到對應 SKU ----
+const BARCODE_ALIAS = {
+  "4412100440017": "CA001",
+  "4412100450047": "CA002"
+};
+
 const F = CFG.formulas;
 let cur=null, sec=null, pos=null, spec=null, weigh=false, mult=1, writeCol=null, disp="";
 let dualCfg=null, dualSlot=null;   // 雙格式（大/小、假清/烘焙）：dualCfg=設定, dualSlot=目前選哪一側
@@ -669,6 +675,7 @@ document.addEventListener("visibilitychange",()=>{
 // 條碼格式：兩碼英文＋三碼數字（＋可選兩碼位置後綴），例如 JZ001、HB003DF、BP012SA
 let lastApplied="";   // 已套用過的完整條碼，避免持續掃描重複觸發
 function parseCode(code){
+  if(BARCODE_ALIAS[code]) return {base:BARCODE_ALIAS[code], suf:null};
   const m=code.match(/^([A-Z]{2}\d{3})([A-Z0-9]{2})?$/);
   return m ? {base:m[1], suf:m[2]||null} : {base:code, suf:null};
 }
